@@ -1,11 +1,8 @@
 import asyncio
-import hashlib
 import multiprocessing
 import os
-import struct
-import time
 from ipv8.community import Community, CommunitySettings
-from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs, BootstrapperDefinition, Bootstrapper
+from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.keyvault.crypto import default_eccrypto
 from ipv8.lazy_community import lazy_wrapper
 from ipv8.messaging.payload_dataclass import VariablePayload, vp_compile
@@ -21,8 +18,6 @@ KEY_FILE1 = "my_key.pem"
 KEY_FILE2 = "second_key.pem"
 KEY_FILE3 = "third_key.pem"
 
-
-
 _member_pubkeys: list[bytes] = []
 # ─── Message payloads ────────────────────────
  
@@ -31,18 +26,14 @@ class RegisterPayload(VariablePayload):
     format_list = ["varlenH", "varlenH", "varlenH"]
     names = ["member1_key", "member2_key", "member3_key"]
  
- 
 class ResponsePayload(VariablePayload):
     msg_id = 2
     format_list = ["?", "varlenHutf8", "varlenHutf8"]
     names = ["success", "group_id", "message"]
  
- 
 # Compile for faster (de)serialisation
 RegisterPayload = vp_compile(RegisterPayload)
 ResponsePayload   = vp_compile(ResponsePayload)
- 
- 
  
 # ─── IPv8 Community ──────────────────────────
  
