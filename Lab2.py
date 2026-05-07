@@ -15,7 +15,7 @@ SERVER_PUBKEY_HEX = (
 )
 
 KEY_FILE1 = "my_key.pem"
-KEY_FILE2 = "second_key.pem"
+KEY_FILE2 = "second_key.txt"
 KEY_FILE3 = "third_key.pem"
 
 _member_pubkeys: list[bytes] = []
@@ -30,13 +30,37 @@ class ResponsePayload(VariablePayload):
     msg_id = 2
     format_list = ["?", "varlenHutf8", "varlenHutf8"]
     names = ["success", "group_id", "message"]
+
+class ChallengeRequestPayload(VariablePayload):
+    msg_id = 3
+    format_list = ["varlenHutf8"]
+    names = ["group_id"]
+
+class ChallengeResponsePayload(VariablePayload):
+    msg_id = 4
+    format_list = ["varlenH", "q", "d"]
+    names = ["nonce", "round_number", "deadline"]
+
+class SubmissionPayload(VariablePayload):
+    msg_id = 5
+    format_list = ["varlenH", "q", "VarlenH", "VarlenH", "VarlenH"]
+    names = ["group_id", "round_number", "sig1", "sig2", "sig3"]
+
+class RoundResultPayload(VariablePayload):
+    msg_id = 6
+    format_list = ["?", "q", "q", "VarlenHut8"]
+    names = ["success", "round_number", "round_completed", "message"]
  
 # Compile for faster (de)serialisation
 RegisterPayload = vp_compile(RegisterPayload)
 ResponsePayload   = vp_compile(ResponsePayload)
+ChallengeRequestPayload = vp_compile(ChallengeRequestPayload)
+ChallengeResponsePayload = vp_compile(ChallengeResponsePayload)
+SubmissionPayload = vp_compile(SubmissionPayload)
+RoundResultPayload = vp_compile(RoundResultPayload)
  
 # ─── IPv8 Community ──────────────────────────
- 
+
 class Lab2Community(Community):
     community_id = bytes.fromhex(COMMUNITY_ID_HEX)
  
@@ -54,27 +78,18 @@ class Lab2Community(Community):
  
     def started(self) -> None:
         self.network.add_peer_observer(self)
-    # def started(self) -> None:
-    #     async def debug_peers():
-    #         peers = self.get_peers()
-    #         print(f"👀 Peers seen: {len(peers)}")
-    #         for p in peers:
-    #             print("   ", p)
-
-    #     self.register_task("debug_peers", debug_peers, interval=5.0, delay=0) 
 
     # ── peer discovery ──
  
     def on_peer_added(self, peer: PeerType) -> None:
         print("Peer discovered:", peer)
         pk_bytes = peer.public_key.key_to_bin()
-        if pk_bytes == self._server_pubkey_bytes:
+        if pk_bytes == self._server_pubkey_bytes or pk_bytes in self._member_pubkeys:
             print(f"🔗  Found server peer: {peer}")
             self._server_peer = peer
             if not self._submitted:
                 self._submitted = True
                 asyncio.ensure_future(self._submit())
-                
  
     def on_peer_removed(self, peer: PeerType) -> None:
         if self._server_peer and peer == self._server_peer:
@@ -89,21 +104,38 @@ class Lab2Community(Community):
             member2_key=self._member_pubkeys[1],
             member3_key=self._member_pubkeys[2],
         )
+
+        challengeRequestPayload = ChallengeRequestPayload(group_id=b"my_team_name")        
         print(f"\n📤  Sending submission to server…")
-        self.ez_send(self._server_peer, payload)
+        self.ez_send(self._server_peer, challengeRequestPayload)
  
     # ── response handler ──
  
     @lazy_wrapper(ResponsePayload)
     def on_response(self, peer: PeerType, payload: ResponsePayload) -> None:
         # Only trust the real server
-        if peer.public_key.key_to_bin() != self._server_pubkey_bytes:
+        if (peer.public_key.key_to_bin() != self._server_pubkey_bytes):
             print(f"⚠️  Ignoring response from unknown peer {peer}")
             return
  
         status = "✅  ACCEPTED" if payload.success else "❌  REJECTED"
         print(f"\n{status}")
         print(f"   Message: {payload.message}")
+        self._done.set()
+    
+    @lazy_wrapper(ChallengeResponsePayload)
+    def on_response(self, peer: PeerType, payload: ChallengeResponsePayload) -> None:
+        # Only team members
+        if (peer.public_key.key_to_bin() not in self._member_pubkeys):
+            print(f"⚠️  Ignoring response from unknown peer {peer}")
+            return
+ 
+        nonce = payload.nonce
+        round_number = payload.round_number
+        deadline = payload.deadline
+        
+        print(f"\n⏳  Challenge received for round {round_number} with deadline {deadline} with nonce {nonce.hex()}")
+        
         self._done.set()
  
     async def wait_for_response(self, timeout: float = 120.0) -> None:
@@ -130,8 +162,14 @@ def load_or_create_key(path: str):
  
 async def main(): 
     global _member_pubkeys
-    keys = [load_or_create_key(k) for k in [KEY_FILE1, KEY_FILE2, KEY_FILE3]]
-    _member_pubkeys = [k.pub().key_to_bin() for k in keys]
+    # keys = [load_or_create_key(k) for k in [KEY_FILE1, KEY_FILE2, KEY_FILE3]]
+    # _member_pubkeys = [k.pub().key_to_bin() for k in keys]
+    _member_pubkeys = [
+        load_or_create_key(KEY_FILE1).pub().key_to_bin(),
+        bytes.fromhex("open(KEY_FILE2).read().strip()"),
+        load_or_create_key(KEY_FILE3).pub().key_to_bin(),
+    ]
+    
     builder = (
         ConfigBuilder()
         .clear_keys()
@@ -153,7 +191,7 @@ async def main():
     )
     await ipv8_instance.start()
     await asyncio.sleep(5)
-    print("Walkable addresses known:", ipv8_instance.network.get_walkable_addresses())
+    # print("Walkable addresses known:", ipv8_instance.network.get_walkable_addresses())
  
     community: Lab2Community = ipv8_instance.get_overlay(Lab2Community)
  

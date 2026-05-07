@@ -25,7 +25,7 @@ from ipv8_service import IPv8
 # ──────────────────────────────────────────────
 # FILL THESE IN BEFORE RUNNING
 # ──────────────────────────────────────────────
-YOUR_EMAIL = "a.vandermeijden@student.tudelft.nl"   # <── change this
+YOUR_EMAIL = ""   # <── change this
 YOUR_GITHUB_URL = "https://github.com/AmyAmyy/Blockchain26"  # <── change this (decide BEFORE mining!)
 # ──────────────────────────────────────────────
 
