@@ -43,11 +43,13 @@ class Lab2Community(Community):
         self.member_pubkeys = member_pubkeys
         self.member_peers: list[PeerType] = [None] * MEMBER_COUNT
 
+        self.group_id: str | None = None
+
         self.add_message_handler(ResponsePayload, self.on_response)
         self.add_message_handler(ChallengeResponsePayload, self.on_challenge_response)
         self.add_message_handler(RoundResultPayload, self.on_round_result)
         self._server_peer: PeerType | None = None
-        self.registered_group = False
+        # self.registered_group = False
         self._done = asyncio.Event()
         self._challenge_counter = 0
         
@@ -66,11 +68,8 @@ class Lab2Community(Community):
         if pk_bytes == self._server_pubkey_bytes:
             print(f"🔗  Found server peer: {peer}")
             self._server_peer = peer
-            if not self.registered_group:
-                self.registered_group = True
+            if not self.group_id:
                 asyncio.ensure_future(self.register_group())
-            else:
-                asyncio.ensure_future(self.start_challenge())
         
         elif pk_bytes in self.member_pubkeys:
             print(f"👥  Found team member peer: {peer}")
@@ -107,7 +106,7 @@ class Lab2Community(Community):
     async def start_challenge(self) -> None:
         print(f"\n🚀  Starting challenge round ({self._challenge_counter})")
 
-        challengeRequestPayload = ChallengeRequestPayload(group_id=open("group_id.txt").read().strip())        
+        challengeRequestPayload = ChallengeRequestPayload(group_id=self.group_id)
         print(f"\n📤  Sending challenge to server…")
         self.ez_send(self._server_peer, challengeRequestPayload) # Part 2
  
@@ -120,6 +119,8 @@ class Lab2Community(Community):
         status = "✅  ACCEPTED" if payload.success else "❌  REJECTED"
         print(f"\n{status}")
         print(f"   Message: {payload.message} (Group ID: {payload.group_id})")
+        self.group_id = payload.group_id
+        asyncio.ensure_future(self.start_challenge())
         self._done.set()
     
     @lazy_wrapper(ChallengeResponsePayload)
