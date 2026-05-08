@@ -29,7 +29,7 @@ class SubmissionPayload(VariablePayload):
 
 class RoundResultPayload(VariablePayload):
     msg_id = 6
-    format_list = ["?", "q", "q", "varlenHut8"]
+    format_list = ["?", "q", "q", "varlenHutf8"]
     names = ["success", "round_number", "round_completed", "message"]
 
 

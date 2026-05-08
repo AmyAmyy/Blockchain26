@@ -4,7 +4,7 @@ from ipv8.community import Community, CommunitySettings
 from ipv8.peer import Peer as PeerType
 from ipv8.lazy_community import lazy_wrapper
 
-from message_payloads import RegisterPayload, ResponsePayload, ChallengeRequestPayload, ChallengeResponsePayload
+from message_payloads import RegisterPayload, ResponsePayload, ChallengeRequestPayload, ChallengeResponsePayload, SubmissionPayload, RoundResultPayload
 from ipv8.keyvault.crypto import default_eccrypto
 
 COMMUNITY_ID_HEX = "4c61623247726f75705369676e696e6732303236"
@@ -44,6 +44,8 @@ class Lab2Community(Community):
         self.member_peers: list[PeerType] = [None] * MEMBER_COUNT
 
         self.add_message_handler(ResponsePayload, self.on_response)
+        self.add_message_handler(ChallengeResponsePayload, self.on_challenge_response)
+        self.add_message_handler(RoundResultPayload, self.on_round_result)
         self._server_peer: PeerType | None = None
         self.registered_group = False
         self._done = asyncio.Event()
@@ -67,6 +69,8 @@ class Lab2Community(Community):
             if not self.registered_group:
                 self.registered_group = True
                 asyncio.ensure_future(self.register_group())
+            else:
+                asyncio.ensure_future(self.start_challenge())
         
         elif pk_bytes in self.member_pubkeys:
             print(f"👥  Found team member peer: {peer}")
@@ -97,21 +101,15 @@ class Lab2Community(Community):
             member3_key=self.member_pubkeys[2],
         )
 
-        print(f"\n📤  Sending challenge to server…")
+        print(f"\n📤  Sending registration to server…")
         self.ez_send(self._server_peer, payload) # Part 1
  
     async def start_challenge(self) -> None:
-        print(f"\n🚀  Starting challenge round ({self._challenge_counter}) for team {PERSONAL_COMMUNITY_ID_HEX.hex()}…")
-        payload = RegisterPayload(
-            member1_key=self.member_pubkeys[0],
-            member2_key=self.member_pubkeys[1],
-            member3_key=self.member_pubkeys[2],
-        )
+        print(f"\n🚀  Starting challenge round ({self._challenge_counter})")
 
-        challengeRequestPayload = ChallengeRequestPayload(group_id=b"my_team_name")        
+        challengeRequestPayload = ChallengeRequestPayload(group_id=open("group_id.txt").read().strip())        
         print(f"\n📤  Sending challenge to server…")
-        self.ez_send(self._server_peer, payload) # Part 1
-        # self.ez_send(self._server_peer, challengeRequestPayload) # Part 2
+        self.ez_send(self._server_peer, challengeRequestPayload) # Part 2
  
     @lazy_wrapper(ResponsePayload)
     def on_response(self, peer: PeerType, payload: ResponsePayload) -> None:
@@ -121,24 +119,27 @@ class Lab2Community(Community):
  
         status = "✅  ACCEPTED" if payload.success else "❌  REJECTED"
         print(f"\n{status}")
-        print(f"   Message: {payload.message}")
+        print(f"   Message: {payload.message} (Group ID: {payload.group_id})")
         self._done.set()
     
-    # @lazy_wrapper(ChallengeResponsePayload)
-    # def on_response(self, peer: PeerType, payload: ChallengeResponsePayload) -> None:
-    #     # Only team members
-    #     if (peer.public_key.key_to_bin() not in self.member_pubkeys):
-    #         print(f"⚠️  Ignoring response from unknown peer {peer}")
-    #         return
+    @lazy_wrapper(ChallengeResponsePayload)
+    def on_challenge_response(self, peer: PeerType, payload: ChallengeResponsePayload) -> None:
+        if (peer.public_key.key_to_bin() != self._server_pubkey_bytes):
+            print(f"⚠️  Ignoring response from unknown peer {peer}")
+            return
  
-    #     nonce = payload.nonce
-    #     round_number = payload.round_number
-    #     deadline = payload.deadline
+        nonce = payload.nonce
+        round_number = payload.round_number
+        deadline = payload.deadline
         
-    #     print(f"\n⏳  Challenge received for round {round_number} with deadline {deadline} with nonce {nonce.hex()}")
+        print(f"\n⏳  Challenge received for round {round_number} with deadline {deadline} with nonce {nonce.hex()}")
         
-    #     self._done.set()
- 
+        self._done.set()
+    
+    @lazy_wrapper(RoundResultPayload)
+    def on_round_result(self, peer, payload):
+        print(f"Round result: success={payload.success}, round={payload.round_number}, msg={payload.message}")
+
     async def wait_for_response(self, timeout: float = 120.0) -> None:
         try:
             await asyncio.wait_for(self._done.wait(), timeout=timeout)
