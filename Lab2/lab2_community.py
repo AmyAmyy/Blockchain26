@@ -155,7 +155,7 @@ class Lab2Community(Community):
         if not payload.success:
             # print(f"❌  Registration failed: {payload.message}")
             return
-        print(f"✅  Registered: {payload.message} (group_id={payload.group_id})")
+        # print(f"✅  Registered: {payload.message} (group_id={payload.group_id})")
         self.group_id = payload.group_id
         self._broadcast_group_id()
         asyncio.ensure_future(self._start_round())
@@ -184,7 +184,7 @@ class Lab2Community(Community):
     async def _start_round(self) -> None:
         assert self._i_am_leader(), "Only the round leader requests the challenge"
         self._collected_sigs[self.current_round] = [None, None, None]
-        print(f"\n🚀  [round {self.current_round}] (leader={self.member_id}) requesting challenge")
+        # print(f"\n🚀  [round {self.current_round}] (leader={self.member_id}) requesting challenge")
         self.ez_send(self._server_peer, ChallengeRequestPayload(group_id=self.group_id))
         
     def _send_broadcast_nonce(self, round_number: int, nonce: bytes) -> None:
@@ -212,7 +212,7 @@ class Lab2Community(Community):
         self._send_broadcast_nonce(round_number, nonce)
 
     @lazy_wrapper(NoncePayload)
-    def on_nonce(self, payload: NoncePayload) -> None:
+    def on_nonce(self, peer: PeerType, payload: NoncePayload) -> None:
         round_number = payload.round_number
         sig = self._sign(payload.nonce)
         leader_idx = self.leader_of(round_number)
@@ -242,7 +242,7 @@ class Lab2Community(Community):
     def _submit_round(self) -> None:
         round_number = self.current_round
         sigs = self._collected_sigs[round_number]
-        print(f"📤  [round {round_number}] all 3 sigs collected, submitting bundle ")
+        # print(f"📤  [round {round_number}] all 3 sigs collected, submitting bundle ")
         bundle = SubmissionPayload(
             group_id=self.group_id,
             round_number=round_number,
@@ -268,7 +268,7 @@ class Lab2Community(Community):
             return
 
         if is_from_server:
-            print(f"✅  Round {round_number} successful: {payload.message}")
+            # print(f"✅  Round {round_number} successful: {payload.message}")
             
             # Broadcast the result to other members
             for idx in range(MEMBER_COUNT):
