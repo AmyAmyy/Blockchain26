@@ -204,12 +204,12 @@ class Lab2Community(Community):
         if not self._i_am_leader():
             # print(f"⚠️  Got ChallengeResponse for round {round_number} but I am not its leader")
             return
-            return
+        # Broadcast nonce to the other two members in parallel.
+        self._send_broadcast_nonce(round_number, nonce)
         # Sign locally and store our own slot.
         my_sig = self._sign(nonce)
         self._collected_sigs[round_number][self.member_id] = my_sig
-        # Broadcast nonce to the other two members in parallel.
-        self._send_broadcast_nonce(round_number, nonce)
+        
 
     @lazy_wrapper(NoncePayload)
     def on_nonce(self, peer: PeerType, payload: NoncePayload) -> None:
