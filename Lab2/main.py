@@ -1,6 +1,7 @@
 import asyncio
 import multiprocessing
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
+from ipv8.util import run_forever
 from ipv8_service import IPv8
 from lab2_community import Lab2Community
 
@@ -27,16 +28,10 @@ async def main():
         extra_communities={"Lab2Community": Lab2Community},
     )
     await ipv8_instance.start()
-    await asyncio.sleep(5)
- 
-    community: Lab2Community = ipv8_instance.get_overlay(Lab2Community)
- 
-    print("🌐  IPv8 started — searching for server peer…")
- 
-    await community.wait_for_response(timeout=600)
- 
-    await ipv8_instance.stop()
-    print("\nDone.")
+
+    # print("IPv8 started")
+
+    await run_forever()
  
 
 

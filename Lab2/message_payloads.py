@@ -1,13 +1,13 @@
 from ipv8.messaging.payload_dataclass import VariablePayload
 
 # ─── Message payloads ────────────────────────
- 
+
 class RegisterPayload(VariablePayload):
     msg_id = 1
     format_list = ["varlenH", "varlenH", "varlenH"]
     names = ["member1_key", "member2_key", "member3_key"]
- 
-class ResponsePayload(VariablePayload):
+
+class ResponseRegisterPayload(VariablePayload):
     msg_id = 2
     format_list = ["?", "varlenHutf8", "varlenHutf8"]
     names = ["success", "group_id", "message"]
@@ -24,7 +24,7 @@ class ChallengeResponsePayload(VariablePayload):
 
 class SubmissionPayload(VariablePayload):
     msg_id = 5
-    format_list = ["varlenH", "q", "varlenH", "varlenH", "varlenH"]
+    format_list = ["varlenHutf8", "q", "varlenH", "varlenH", "varlenH"]
     names = ["group_id", "round_number", "sig1", "sig2", "sig3"]
 
 class RoundResultPayload(VariablePayload):
@@ -33,10 +33,24 @@ class RoundResultPayload(VariablePayload):
     names = ["success", "round_number", "round_completed", "message"]
 
 
-# Compile for faster (de)serialisation
-# RegisterPayload = vp_compile(RegisterPayload)
-# ResponsePayload   = vp_compile(ResponsePayload)
-# ChallengeRequestPayload = vp_compile(ChallengeRequestPayload)
-# ChallengeResponsePayload = vp_compile(ChallengeResponsePayload)
-# SubmissionPayload = vp_compile(SubmissionPayload)
-# RoundResultPayload = vp_compile(RoundResultPayload)
+# ─── Internal peer-to-peer payloads (not seen by the server) ────────────────
+
+class GroupIdPayload(VariablePayload):
+    """Member 0 broadcasts the registered group_id to members 1 and 2."""
+    msg_id = 7
+    format_list = ["varlenHutf8"]
+    names = ["group_id"]
+
+
+class NoncePayload(VariablePayload):
+    """Round leader broadcasts the freshly received nonce to the other members."""
+    msg_id = 8
+    format_list = ["q", "varlenH"]
+    names = ["round_number", "nonce"]
+
+
+class SignaturePayload(VariablePayload):
+    """Non-leader sends its signature on the nonce back to the round leader."""
+    msg_id = 9
+    format_list = ["q", "q", "varlenH"]
+    names = ["round_number", "member_index", "signature"]
