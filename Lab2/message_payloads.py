@@ -41,14 +41,6 @@ class GroupIdPayload(VariablePayload):
     format_list = ["varlenHutf8"]
     names = ["group_id"]
 
-
-class NoncePayload(VariablePayload):
-    """Round leader broadcasts the freshly received nonce to the other members."""
-    msg_id = 8
-    format_list = ["q", "varlenH"]
-    names = ["round_number", "nonce"]
-
-
 class SignaturePayload(VariablePayload):
     """Non-leader sends its signature on the nonce back to the round leader."""
     msg_id = 9
