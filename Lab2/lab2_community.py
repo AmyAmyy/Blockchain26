@@ -259,11 +259,6 @@ class Lab2Community(Community):
         if is_from_server:
             # print(f"✅  Round {round_number} successful: {payload.message}")
             self._broadcast(payload=payload)
-            
-            # Broadcast the result to other members
-            # for idx in range(MEMBER_COUNT):
-            #     if idx != self.member_id:
-            #         self._send_to_member(idx, payload)
         
         # Auto-advance if I'm the next leader
         next_round = round_number + 1
