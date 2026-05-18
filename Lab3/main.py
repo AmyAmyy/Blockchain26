@@ -14,7 +14,7 @@ async def main():
         .clear_overlays()
         .add_key("my_key", "curve25519", "my_key.pem") # Change this to own key
         .add_overlay(
-            "Lab2Community",
+            "Lab3Community",
             "my_key",
             [WalkerDefinition(Strategy.RandomWalk, 50, {"timeout": 3.0})],
             default_bootstrap_defs,
@@ -25,7 +25,7 @@ async def main():
  
     ipv8_instance = IPv8(
         builder.finalize(),
-        extra_communities={"Lab2Community": Lab2Community},
+        extra_communities={"Lab3Community": Lab3Community},
     )
     await ipv8_instance.start()
 
