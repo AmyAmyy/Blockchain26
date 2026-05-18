@@ -3,7 +3,8 @@ import multiprocessing
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.util import run_forever
 from ipv8_service import IPv8
-from lab2_community import Lab2Community
+from lab3_community import Lab3Community
+from blockchain_community import BlockchainCommunity
 
  # ─── Main ────────────────────────────────────
  
@@ -21,15 +22,23 @@ async def main():
             {},
             [("started",)],
         )
+        # .add_overlay(
+        #     "BlockchainCommunity",
+        #     "my_key",
+        #     [WalkerDefinition(Strategy.RandomWalk, 50, {"timeout": 3.0})],
+        #     default_bootstrap_defs,
+        #     {},
+        #     [("started",)],
+        # )
     )
  
     ipv8_instance = IPv8(
         builder.finalize(),
-        extra_communities={"Lab3Community": Lab3Community},
+        extra_communities={"Lab3Community": Lab3Community, "BlockchainCommunity": BlockchainCommunity},
     )
     await ipv8_instance.start()
 
-    # print("IPv8 started")
+    print("IPv8 started")
 
     await run_forever()
  
