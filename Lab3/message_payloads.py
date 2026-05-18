@@ -1,6 +1,6 @@
 from ipv8.messaging.payload_dataclass import VariablePayload
 
-# ─── Message payloads ────────────────────────
+# ─── Part 1 ────────────────────────
 
 class RegisterBlockchain(VariablePayload):
     msg_id = 1
@@ -11,6 +11,8 @@ class RegisterResponse(VariablePayload):
     msg_id = 2
     format_list = ["?", "varlenHutf8"]
     names = ["success", "message"]
+
+# ─── Part 2 ────────────────────────
 
 class SubmitTransaction(VariablePayload):
     msg_id = 1
