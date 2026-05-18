@@ -1,4 +1,3 @@
-import os
 import asyncio
 from ipv8.community import Community, CommunitySettings
 from ipv8.peer import Peer as PeerType
@@ -14,32 +13,26 @@ from message_payloads import (
     SubmitTransaction,
     SubmitTransactionResponse
 )
-
-COMMUNITY_ID = '\x01\xb6\xf0}H\xc6R\xc9H\x1a\xd6\x11H\xf6{G%i\xf3i'
-SERVER_PUBKEY_HEX = (
-    "4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6"
+from constants import (
+    BLOCKCHAIN_COMMUNITY_ID,
+    SERVER_PUBKEY_BYTES,
+    GROUP_ID,
+    MEMBER_COUNT,
+    MY_MEMBER_ID,
+    load_member_pubkeys,
 )
 
-KEY_FILES = ["first_key.txt", "second_key.txt", "third_key.txt"]
-MEMBER_COUNT = 3
-
-# 0, 1, or 2. Unique per team member, determines which pubkey we expect us to have
-MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "0"))
-
-def _load_member_pubkeys() -> list[bytes]:
-    """Load the 3 registered Lab-1 public keys from disk (hex-encoded)."""
-    return [bytes.fromhex(open(p).read().strip()) for p in KEY_FILES]
 
 class BlockchainCommunity(Community):
-    community_id = COMMUNITY_ID
+    community_id = BLOCKCHAIN_COMMUNITY_ID
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
         self.member_id: int = MY_MEMBER_ID
-        self.member_pubkeys: list[bytes] = _load_member_pubkeys()
+        self.member_pubkeys: list[bytes] = load_member_pubkeys()
         self.member_peers: list[PeerType | None] = [None] * MEMBER_COUNT
 
-        self.group_id = "206290bb8cc8016f"
+        self.group_id = GROUP_ID
 
         # Sanity-check: my IPv8 key MUST match the pubkey at MY_MEMBER_ID,
         # otherwise the server will reject every signed packet.
@@ -53,7 +46,7 @@ class BlockchainCommunity(Community):
         # I already know my own peer object.
         self.member_peers[self.member_id] = self.my_peer
 
-        self._server_pubkey_bytes = bytes.fromhex(SERVER_PUBKEY_HEX)
+        self._server_pubkey_bytes = SERVER_PUBKEY_BYTES
         self._server_peer: PeerType | None = None
 
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
