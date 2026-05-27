@@ -22,6 +22,7 @@ from constants import (
     load_member_pubkeys,
 )
 
+from blockchain import Transaction, Blockchain
 
 class BlockchainCommunity(Community):
     community_id = BLOCKCHAIN_COMMUNITY_ID
@@ -33,6 +34,7 @@ class BlockchainCommunity(Community):
         self.member_peers: list[PeerType | None] = [None] * MEMBER_COUNT
 
         self.group_id = GROUP_ID
+        self.blockchain = Blockchain()
 
         # Sanity-check: my IPv8 key MUST match the pubkey at MY_MEMBER_ID,
         # otherwise the server will reject every signed packet.
@@ -56,82 +58,88 @@ class BlockchainCommunity(Community):
     def started(self) -> None:
         self.network.add_peer_observer(self)
 
-    # ── helpers ─────────────────────────────────────────────────────────────
-    
-    def _registered(self) -> bool:
-        return self.group_id is not None
-
-    # def _sign(self, nonce: bytes) -> bytes:
-    #     """Ed25519 sign the raw nonce with our IPv8 key."""
-    #     return self.my_peer.key.signature(nonce)
-
-    def _send_to_member(self, member_idx: int, payload) -> None:
-        peer = self.member_peers[member_idx]
-        if peer is None:
-            # print(f"⚠️  Cannot send to member {member_idx}: peer not yet discovered")
-            return
-        self.ez_send(peer, payload)
-
-    def _all_teammembers_known(self) -> bool:
-        return all(p is not None for p in self.member_peers)
-
     # ── peer discovery ──────────────────────────────────────────────────────
     def on_peer_added(self, peer: PeerType) -> None:
         pk_bytes = peer.public_key.key_to_bin()
         if pk_bytes == self._server_pubkey_bytes:
-            # print(f"Found server peer: {peer}")
+            print(f"Found server peer: {peer}")
             self._server_peer = peer
 
         elif pk_bytes in self.member_pubkeys:
             idx = self.member_pubkeys.index(pk_bytes)
             if self.member_peers[idx] is None:
-                # print(f"Found team member peer #{idx}: {peer}")
+                print(f"Found team member peer #{idx}: {peer}")
                 self.member_peers[idx] = peer
                 self._ready_peers.add(idx)
         
         if self._all_teammembers_known() and self._server_peer is not None:
-            # print("All team members and server discovered")
-            if self.member_id == 0 and not self._registration_sent:
-                self._registration_sent = True
-                asyncio.ensure_future(self._register_group())
-                
+            print("All team members and server discovered")
         
     def on_peer_removed(self, peer: PeerType) -> None:
         if self._server_peer is not None and peer == self._server_peer:
-            # print("⚠️  Server peer disconnected")
+            print("⚠️  Server peer disconnected")
             self._server_peer = None
         if peer in self.member_peers:
             idx = self.member_peers.index(peer)
-            # print(f"⚠️  Team member peer #{idx} disconnected: {peer}")
+            print(f"⚠️  Team member peer #{idx} disconnected: {peer}")
             self.member_peers[idx] = None
             self._ready_peers.discard(idx)
 
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
-        return
-    
-    def _submit_transaction_response(self) -> None:
-        bundle = SubmitTransactionResponse(
-            # TODO
+        transaction = Transaction(
+            sender_key = payload.sender_key,
+            data = payload.data,
+            timestamp = payload.timestamp,
+            signature = payload.signature,
         )
-        self.ez_send(self._server_peer, bundle)
+        
+        if not transaction.verify_signature():
+            print("⚠️  Received transaction with invalid signature")
+            bundle = SubmitTransactionResponse(
+                success = False,
+                tx_hash = transaction.tx_hash,
+                message = "Invalid transaction signature"
+            )
+            self.ez_send(peer, bundle)
+            return
+        
+        self.blockchain.mempool.append(transaction)
+        print(f"Received valid transaction, mempool size is now {len(self.blockchain.mempool)}")
+        bundle = SubmitTransactionResponse(
+            success = True,
+            tx_hash = transaction.tx_hash,
+            message = "Transaction accepted"
+        )
+        self.ez_send(peer, bundle)
+        
     
     @lazy_wrapper(GetChainHeight)
     def on_chain_height(self, peer: PeerType, payload: GetChainHeight) -> None:
-        return
-
-    def _chain_height_response(self) -> None:
+        height = self.blockchain.get_chain_height()
+        tip_hash = self.blockchain.get_block(height).block_hash
         bundle = ChainHeightResponse(
-            # TODO
+            request_id = payload.request_id,
+            height = height,
+            tip_hash = tip_hash,
         )
-        self.ez_send(self._server_peer, bundle)
+        self.ez_send(peer, bundle)
 
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:
-        return
-    
-    def _block_response(self) -> None:
+        block = self.blockchain.get_block(payload.height)
+        if block is None:
+            print(f"⚠️  Received GetBlock for invalid height {payload.height}")
+            return
+        
         bundle = BlockResponse(
-            # TODO
+            height = payload.height,
+            prev_hash = block.prev_hash,
+            txs_hash = block.txs_hash,
+            timestamp = block.timestamp,
+            difficulty = block.difficulty,
+            nonce = block.nonce,
+            block_hash = block.block_hash,
+            tx_hashes = block.tx_hashes,
         )
-        self.ez_send(self._server_peer, bundle)
+        self.ez_send(peer, bundle)
