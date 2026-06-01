@@ -54,26 +54,31 @@ class BlockchainCommunity(Community):
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
+        self._ready_peers: set[int] = {self.member_id}
 
     def started(self) -> None:
         self.network.add_peer_observer(self)
 
+    def _all_teammembers_known(self) -> bool:
+        return all(p is not None for p in self.member_peers)
+
     # ── peer discovery ──────────────────────────────────────────────────────
     def on_peer_added(self, peer: PeerType) -> None:
+        print(f"Found peer: {peer}")
         pk_bytes = peer.public_key.key_to_bin()
         if pk_bytes == self._server_pubkey_bytes:
-            print(f"Found server peer: {peer}")
+            print(f"Found server peer in blockchain community: {peer}")
             self._server_peer = peer
 
         elif pk_bytes in self.member_pubkeys:
             idx = self.member_pubkeys.index(pk_bytes)
             if self.member_peers[idx] is None:
-                print(f"Found team member peer #{idx}: {peer}")
+                print(f"Found team member peer in blockchain community #{idx}: {peer}")
                 self.member_peers[idx] = peer
                 self._ready_peers.add(idx)
         
         if self._all_teammembers_known() and self._server_peer is not None:
-            print("All team members and server discovered")
+            print("All team members and server discovered in blockchain community!")
         
     def on_peer_removed(self, peer: PeerType) -> None:
         if self._server_peer is not None and peer == self._server_peer:
@@ -87,6 +92,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
+        print(f"Received SubmitTransaction from {peer}, data={payload.data[:20]}…")
         transaction = Transaction(
             sender_key = payload.sender_key,
             data = payload.data,
@@ -116,6 +122,7 @@ class BlockchainCommunity(Community):
     
     @lazy_wrapper(GetChainHeight)
     def on_chain_height(self, peer: PeerType, payload: GetChainHeight) -> None:
+        print(f"Received GetChainHeight request: {payload.request_id}")
         height = self.blockchain.get_chain_height()
         tip_hash = self.blockchain.get_block(height).block_hash
         bundle = ChainHeightResponse(
@@ -127,6 +134,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:
+        print(f"Received GetBlock for height {payload.height}")
         block = self.blockchain.get_block(payload.height)
         if block is None:
             print(f"⚠️  Received GetBlock for invalid height {payload.height}")

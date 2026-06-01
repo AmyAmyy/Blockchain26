@@ -22,14 +22,14 @@ async def main():
             {},
             [("started",)],
         )
-        # .add_overlay(
-        #     "BlockchainCommunity",
-        #     "my_key",
-        #     [WalkerDefinition(Strategy.RandomWalk, 50, {"timeout": 3.0})],
-        #     default_bootstrap_defs,
-        #     {},
-        #     [("started",)],
-        # )
+        .add_overlay(
+            "BlockchainCommunity",
+            "my_key",
+            [WalkerDefinition(Strategy.RandomWalk, 50, {"timeout": 3.0})],
+            default_bootstrap_defs,
+            {},
+            [("started",)],
+        )
     )
  
     ipv8_instance = IPv8(
