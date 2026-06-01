@@ -27,7 +27,7 @@ class SubmitTransactionResponse(VariablePayload):
 class GetChainHeight(VariablePayload):
     msg_id = 3
     format_list = ["q"]
-    names = ["requester_id"]
+    names = ["request_id"]
 
 class ChainHeightResponse(VariablePayload):
     msg_id = 4

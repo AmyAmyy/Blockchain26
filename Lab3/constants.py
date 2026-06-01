@@ -24,9 +24,16 @@ KEY_FILES = ["first_key.txt", "second_key.txt", "third_key.txt"]
 MEMBER_COUNT = 3
 
 # 0, 1, or 2. Unique per team member, determines which pubkey we expect to have.
-MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "0"))
+MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "1"))
 
 
 def load_member_pubkeys() -> list[bytes]:
     """Load the 3 registered Lab-1 public keys from disk (hex-encoded)."""
     return [bytes.fromhex(open(p).read().strip()) for p in KEY_FILES]
+
+# ── Genesis block ───────────────────────────────────────────────────
+
+GENESIS_PREV_HASH = b'\x00' * 32
+GENESIS_TIMESTAMP = 1748736000  # Fixed for all nodes
+GENESIS_DIFFICULTY = 0
+GENESIS_NONCE     = 0
