@@ -35,6 +35,8 @@ class BlockchainCommunity(Community):
         self.group_id = GROUP_ID
         self.blockchain = Blockchain()
 
+        self._mining_enabled = False
+
         # Sanity-check: my IPv8 key MUST match the pubkey at MY_MEMBER_ID,
         # otherwise the server will reject every signed packet.
         my_pk = self.my_peer.public_key.key_to_bin()
@@ -76,6 +78,7 @@ class BlockchainCommunity(Community):
                 self._ready_peers.add(idx)
         
         if self._all_teammembers_known() and self._server_peer is not None:
+            self._mining_enabled = True
             print("All team members and server discovered")
         
     def on_peer_removed(self, peer: PeerType) -> None:
@@ -149,3 +152,33 @@ class BlockchainCommunity(Community):
             tx_hashes = b"".join(block.tx_hashes),
         )
         self.ez_send(peer, bundle)
+    
+    async def _mining_loop(self) -> None:
+        """Continuously mine blocks in a background thread."""
+        # Small delay to let peers connect before we start mining
+        print(f"[mining] Started (difficulty={self.blockchain.MINING_DIFFICULTY})")
+
+        while self._mining_enabled:
+            try:
+            #     # Run the CPU-bound mining in a thread to avoid blocking the event loop
+            #     new_block = await asyncio.get_event_loop().run_in_executor(
+            #         None, self.blockchain.mine_next_block
+            #     )
+            #     height = self.blockchain.get_chain_height()
+            #     print(
+            #         f"[mining] Mined block {height} "
+            #         f"hash={new_block.block_hash.hex()[:16]}... "
+            #         f"txs={len(new_block.tx_hashes)}"
+            #     )
+
+            #     # Broadcast to peers
+            #     self._broadcast_block(new_block, height)
+
+            #     # Brief pause between blocks to let network messages propagate
+            #     await asyncio.sleep(0.5)
+
+            # except asyncio.CancelledError:
+            #     break
+            # except Exception as e:
+            #     print(f"[mining] Error: {e}")
+            #     await asyncio.sleep(1)

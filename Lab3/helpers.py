@@ -104,7 +104,7 @@ def satisfies_pow(h: bytes, difficulty: int) -> bool:
     return leading_zero_bits(h) >= difficulty
 
 
-def mine_block(prev_hash: bytes, tx_hashes: list[bytes],
+def mine(prev_hash: bytes, tx_hashes: list[bytes],
                difficulty: int, timestamp: int | None = None) -> dict:
     """
     Search for a nonce that satisfies the declared difficulty.
@@ -121,14 +121,15 @@ def mine_block(prev_hash: bytes, tx_hashes: list[bytes],
     while True:
         h = block_hash(prev_hash, commitment, timestamp, difficulty, nonce)
         if satisfies_pow(h, difficulty):
-            return dict(
-                prev_hash  = prev_hash,
-                txs_hash   = commitment,
-                timestamp  = timestamp,
-                difficulty = difficulty,
-                nonce      = nonce,
-                block_hash = h,
-            )
+            # return dict(
+            #     prev_hash  = prev_hash,
+            #     txs_hash   = commitment,
+            #     timestamp  = timestamp,
+            #     difficulty = difficulty,
+            #     nonce      = nonce,
+            #     block_hash = h,
+            # )
+            return nonce
         nonce += 1
 
 

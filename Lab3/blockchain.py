@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from hashlib import sha256
 import struct
+import time
 from ipv8.keyvault.crypto import default_eccrypto
 from constants import GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE
+from helpers import mine, mine_block, txs_hash
 
 # ── helpers ─────────────────────────────────────────────────────────────
     
@@ -114,3 +116,32 @@ class Blockchain:
         if 0 <= height < len(self.chain):
             return self.chain[height]
         return None
+    
+    def add_block(self, difficulty: int) -> Block:
+        prev_block = self.chain[-1]
+        prev_hash = prev_block.block_hash
+        tx_hashes = [tx.tx_hash for tx in self.mempool]
+        self.mempool.remove(0, len(self.mempool))
+        timestamp = int(time.time())
+
+        mined_nonce = mine(prev_hash, tx_hashes, difficulty, timestamp)
+    
+        txs_hash = compute_txs_hash(tx_hashes)
+        block_hash = compute_block_hash(prev_hash, txs_hash, timestamp, difficulty, mined_nonce)
+
+        new_block = Block(
+            prev_hash = prev_hash,
+            txs_hash = txs_hash,
+            timestamp = timestamp,
+            difficulty = difficulty,
+            nonce = mined_nonce,
+            block_hash = block_hash,
+            tx_hashes = tx_hashes,
+        )
+        
+        # Add to chain and clear mempool
+        self.chain.append(new_block)
+
+        print(f"Mined new block at height {self.get_chain_height()} with {len(tx_hashes)} transactions")
+        
+        return new_block
