@@ -21,7 +21,7 @@ from constants import (
     load_member_pubkeys,
 )
 
-from blockchain import Transaction, Blockchain
+from blockchain import Transaction, Blockchain, Block
 
 class BlockchainCommunity(Community):
     community_id = BLOCKCHAIN_COMMUNITY_ID
@@ -95,6 +95,7 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
         print("Received transaction")
+        # TODO check if from teammates or server
         transaction = Transaction(
             sender_key = payload.sender_key,
             data = payload.data,
@@ -125,6 +126,7 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(GetChainHeight)
     def on_chain_height(self, peer: PeerType, payload: GetChainHeight) -> None:
         print("Received chain height function")
+        # TODO check if from teammates or server
         height = self.blockchain.get_chain_height()
         tip_hash = self.blockchain.get_block(height).block_hash
         bundle = ChainHeightResponse(
@@ -137,6 +139,7 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:
         print(f"Received on get block with height {payload.height}")
+        # TODO check if from teammates or server
         block = self.blockchain.get_block(payload.height)
         if block is None:
             print(f"⚠️  Received GetBlock for invalid height {payload.height}")
@@ -154,6 +157,36 @@ class BlockchainCommunity(Community):
         )
         self.ez_send(peer, bundle)
     
+    @lazy_wrapper(BlockResponse)
+    def on_block_response(self, peer: PeerType, payload: BlockResponse) -> None:
+        print(f"Received block")
+        # TODO check if from teammates or server
+
+        block = Block(
+            prev_hash=payload.prev_hash,
+            txs_hash=payload.txs_hash,
+            timestamp=payload.timestamp,
+            difficulty=payload.difficulty,
+            nonce=payload.nonce,
+            block_hash=payload.block_hash,
+            tx_hashes=payload.tx_hashes,
+        )
+
+        if not block.verify_block():
+            # TODO
+            print(f"NOT GOOD, block wrong")
+            return
+        
+        if payload.height <= self.blockchain.get_chain_height:
+            print(f"too far behind or same height")
+            return
+        
+        if payload.height - 1 > self.blockchain.get_chain_height:
+            # TODO get multiple blocks including last
+            return
+        
+        self.blockchain.append_block(block)
+    
     async def _mining_loop(self) -> None:
         """Mine only when there is at least one transaction in the mempool."""
         print("[mining] Started")
@@ -167,7 +200,7 @@ class BlockchainCommunity(Community):
                 # Mining is CPU-bound, so run it in a worker thread.
                 new_block = await asyncio.get_running_loop().run_in_executor(
                     None,
-                    self.blockchain.add_block,
+                    self.blockchain.mine_block,
                 )
                 height = self.blockchain.get_chain_height()
                 print(

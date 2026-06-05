@@ -25,7 +25,7 @@ KEY_FILES = ["first_key.txt", "second_key.txt", "third_key.txt"]
 MEMBER_COUNT = 3
 
 # 0, 1, or 2. Unique per team member, determines which pubkey we expect to have.
-MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "2"))
+MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "0"))
 
 
 def load_member_pubkeys() -> list[bytes]:

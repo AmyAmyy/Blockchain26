@@ -3,8 +3,10 @@ from hashlib import sha256
 import struct
 import time
 from ipv8.keyvault.crypto import default_eccrypto
+from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE
 from helpers import mine, compute_block_hash, compute_txs_hash, check_pow
-from constants import GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE, DIFFICULTY
+
+# ── Block  ─────────────────────────────────────────────────────────────
 
 @dataclass
 class Block:
@@ -38,6 +40,7 @@ class Block:
         
         return True
     
+    
 # ── Transaction  ─────────────────────────────────────────────────────────────
     
 @dataclass
@@ -64,7 +67,7 @@ class Transaction:
     
 class Blockchain:
     def __init__(self):
-        self.chain: list[Block] = [self._make_genesis()]
+        self.chain: list[Block] = [self.make_genesis()]
         self.mempool: list[Transaction] = []
         
     def get_chain_height(self) -> int:
@@ -75,7 +78,10 @@ class Blockchain:
             return self.chain[height]
         return None
     
-    def add_block(self) -> Block:
+    def append_block(self, block: Block):
+        self.chain.append(block)
+    
+    def mine_block(self) -> Block:
         difficulty = DIFFICULTY
         prev_block = self.chain[-1]
         prev_hash = prev_block.block_hash
@@ -99,13 +105,14 @@ class Blockchain:
         )
         
         # Add to chain and clear mempool
+        # TODO niet meteen block toevoegen maar eerst checken
         self.chain.append(new_block)
 
         print(f"Mined new block at height {self.get_chain_height()} with {len(tx_hashes)} transactions")
         
         return new_block
     
-    def _make_genesis(self) -> Block:
+    def make_genesis(self) -> Block:
         txs_hash = compute_txs_hash([])   # SHA256(b"")
         nonce = GENESIS_NONCE
         block_hash = compute_block_hash(

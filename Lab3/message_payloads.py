@@ -43,3 +43,10 @@ class BlockResponse(VariablePayload):
     msg_id = 6
     format_list = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
     names = ["height", "prev_hash", "txs_hash", "timestamp", "difficulty", "nonce", "block_hash", "tx_hashes"]
+
+# ─── Blockchain community messages ────────────────────────
+
+# class BroadcastBlock(VariablePayload):
+#     msg_id = 7
+#     format_list = ["q", "varlenH", "varlenH", "varlenH", "q", "q", "q", "varlenH"]
+#     names = ["height", "prev_hash", "txs_hash", "block_hash", "timestamp", "difficulty", "nonce", "tx_hashes"]
