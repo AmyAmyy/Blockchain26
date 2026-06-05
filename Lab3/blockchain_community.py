@@ -2,6 +2,7 @@ import asyncio
 from ipv8.community import Community, CommunitySettings
 from ipv8.peer import Peer as PeerType
 from ipv8.lazy_community import lazy_wrapper
+from hashlib import sha256
 
 from message_payloads import (
     GetChainHeight,
@@ -35,7 +36,7 @@ class BlockchainCommunity(Community):
         self.group_id = GROUP_ID
         self.blockchain = Blockchain()
 
-        self._mining_enabled = False
+        self._mining_task: asyncio.Task | None = None
 
         # Sanity-check: my IPv8 key MUST match the pubkey at MY_MEMBER_ID,
         # otherwise the server will reject every signed packet.
@@ -77,8 +78,8 @@ class BlockchainCommunity(Community):
                 self.member_peers[idx] = peer
                 self._ready_peers.add(idx)
         
-        if self._all_teammembers_known() and self._server_peer is not None:
-            self._mining_enabled = True
+        if self._all_teammembers_known() and self._server_peer is not None and self._mining_task is None:
+            self._mining_task = asyncio.create_task(self._mining_loop())
             print("All team members and server discovered")
         
     def on_peer_removed(self, peer: PeerType) -> None:
@@ -93,7 +94,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
-        print(f"Received transaction")
+        print("Received transaction")
         transaction = Transaction(
             sender_key = payload.sender_key,
             data = payload.data,
@@ -123,7 +124,7 @@ class BlockchainCommunity(Community):
     
     @lazy_wrapper(GetChainHeight)
     def on_chain_height(self, peer: PeerType, payload: GetChainHeight) -> None:
-        print(f"Received chain height function")
+        print("Received chain height function")
         height = self.blockchain.get_chain_height()
         tip_hash = self.blockchain.get_block(height).block_hash
         bundle = ChainHeightResponse(
@@ -154,31 +155,28 @@ class BlockchainCommunity(Community):
         self.ez_send(peer, bundle)
     
     async def _mining_loop(self) -> None:
-        """Continuously mine blocks in a background thread."""
-        # Small delay to let peers connect before we start mining
-        print(f"[mining] Started (difficulty={self.blockchain.MINING_DIFFICULTY})")
+        """Mine only when there is at least one transaction in the mempool."""
+        print("[mining] Started")
 
-        while self._mining_enabled:
+        while True:
+            if not self.blockchain.mempool:
+                await asyncio.sleep(0.2)
+                continue
+
             try:
-            #     # Run the CPU-bound mining in a thread to avoid blocking the event loop
-            #     new_block = await asyncio.get_event_loop().run_in_executor(
-            #         None, self.blockchain.mine_next_block
-            #     )
-            #     height = self.blockchain.get_chain_height()
-            #     print(
-            #         f"[mining] Mined block {height} "
-            #         f"hash={new_block.block_hash.hex()[:16]}... "
-            #         f"txs={len(new_block.tx_hashes)}"
-            #     )
-
-            #     # Broadcast to peers
-            #     self._broadcast_block(new_block, height)
-
-            #     # Brief pause between blocks to let network messages propagate
-            #     await asyncio.sleep(0.5)
-
-            # except asyncio.CancelledError:
-            #     break
-            # except Exception as e:
-            #     print(f"[mining] Error: {e}")
-            #     await asyncio.sleep(1)
+                # Mining is CPU-bound, so run it in a worker thread.
+                new_block = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    self.blockchain.add_block,
+                )
+                height = self.blockchain.get_chain_height()
+                print(
+                    f"[mining] Mined block {height} "
+                    f"hash={new_block.block_hash.hex()[:16]}... "
+                    f"txs={len(new_block.tx_hashes)}"
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[mining] Error: {e}")
+                await asyncio.sleep(1)
