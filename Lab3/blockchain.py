@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 import struct
 import time
+from Lab3.message_payloads import BlockResponse
 from ipv8.keyvault.crypto import default_eccrypto
 from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE, MAX_TX_HASHES
 from helpers import mine, compute_block_hash, compute_txs_hash, check_pow
@@ -109,6 +110,19 @@ class Blockchain:
         # Add to chain and clear mempool
         # TODO niet meteen block toevoegen maar eerst checken
         self.chain.append(new_block)
+
+        bundle = BlockResponse(
+            height = self.get_chain_height(),
+            prev_hash = new_block.prev_hash,
+            txs_hash = new_block.txs_hash,
+            timestamp = new_block.timestamp,
+            difficulty = new_block.difficulty,
+            nonce = new_block.nonce,
+            block_hash = new_block.block_hash,
+            tx_hashes = b"".join(new_block.tx_hashes),
+        )
+        for peer in self.peers:
+            self.ez_send(peer, bundle)
 
         print(f"Mined new block at height {self.get_chain_height()} with {len(tx_hashes)} transactions")
         

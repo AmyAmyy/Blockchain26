@@ -110,8 +110,10 @@ class BlockchainCommunity(Community):
         '''Handle a SubmitTransaction message from server. Validate the transaction and add it to the mempool if valid.'''
         print("Received transaction")
         
-        if self._server_peer is not None and peer == self._server_peer:
+        if not self.from_server_or_teammate(peer):
             return
+
+        print("server or teammate")
 
         transaction = Transaction(
             sender_key = payload.sender_key,
@@ -120,6 +122,7 @@ class BlockchainCommunity(Community):
             signature = payload.signature,
         )
         
+        print(f"Transaction details: sender={transaction.sender_key.hex()[:16]}... data={transaction.data[:16]}... timestamp={transaction.timestamp} signature={transaction.signature.hex()[:16]}...")
         if not transaction.verify_signature():
             print("⚠️  Received transaction with invalid signature")
             bundle = SubmitTransactionResponse(
@@ -130,6 +133,7 @@ class BlockchainCommunity(Community):
             self.ez_send(peer, bundle)
             return
         
+        print("Transaction signature valid")
         self.blockchain.mempool.append(transaction)
         print(f"Received valid transaction, mempool size is now {len(self.blockchain.mempool)}")
         bundle = SubmitTransactionResponse(
@@ -323,7 +327,7 @@ class BlockchainCommunity(Community):
                 print(f"[mining] Error: {e}")
                 await asyncio.sleep(1)
                 
-    def extract_ith_block_from_payload(payload, i: int) -> Block | None:
+    def extract_ith_block_from_payload(self,payload, i: int) -> Block | None:
         # payload.block_count: int
         # payload.blocks_data: bytes
         # Returns Block or None

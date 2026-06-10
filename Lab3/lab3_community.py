@@ -76,7 +76,7 @@ class Lab3Community(Community):
     def on_peer_added(self, peer: PeerType) -> None:
         pk_bytes = peer.public_key.key_to_bin()
         pk_hex = pk_bytes.hex()
-        print(f"Found peer: {pk_hex[:40]}…")
+        # print(f"Found peer: {pk_hex[:40]}…")
         if pk_bytes == self._server_pubkey_bytes:
             print(f"Found server peer in lab3 community: {peer}")
             self._server_peer = peer
