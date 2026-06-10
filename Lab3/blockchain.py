@@ -3,7 +3,7 @@ from hashlib import sha256
 import struct
 import time
 from ipv8.keyvault.crypto import default_eccrypto
-from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE
+from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE, MAX_TX_HASHES
 from helpers import mine, compute_block_hash, compute_txs_hash, check_pow
 
 # ── Block  ─────────────────────────────────────────────────────────────
@@ -85,7 +85,9 @@ class Blockchain:
         difficulty = DIFFICULTY
         prev_block = self.chain[-1]
         prev_hash = prev_block.block_hash
-        tx_hashes = [tx.tx_hash for tx in self.mempool]
+        tx_hashes = [tx.tx_hash for tx in self.mempool[:MAX_TX_HASHES]]
+        if len(self.mempool) > MAX_TX_HASHES:
+            print(f"Mining block with max {MAX_TX_HASHES} tx hashes; {len(self.mempool) - MAX_TX_HASHES} txs remain in mempool")
         del self.mempool[:len(tx_hashes)]
         timestamp = int(time.time())
 

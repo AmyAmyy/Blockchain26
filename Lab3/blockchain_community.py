@@ -9,6 +9,9 @@ from message_payloads import (
     ChainHeightResponse,
     GetBlock,
     BlockResponse,
+    GetMultipleBlocks,
+    MultipleBlocksResponse,
+    MultipleBlocksResponse,
     SubmitTransaction,
     SubmitTransactionResponse
 )
@@ -18,6 +21,7 @@ from constants import (
     GROUP_ID,
     MEMBER_COUNT,
     MY_MEMBER_ID,
+    MAX_TX_HASHES,
     load_member_pubkeys,
 )
 
@@ -62,6 +66,14 @@ class BlockchainCommunity(Community):
 
     def _all_teammembers_known(self) -> bool:
         return all(p is not None for p in self.member_peers)
+    
+    def from_server_or_teammate(self, peer: PeerType) -> bool:
+        if self._server_peer is not None and peer == self._server_peer:
+            return True
+        if peer in self.member_peers:
+            return True
+        print("⚠️  Received message from unknown peer, ignoring")
+        return False
 
     # ── peer discovery ──────────────────────────────────────────────────────
     
@@ -92,10 +104,15 @@ class BlockchainCommunity(Community):
             self.member_peers[idx] = None
             self._ready_peers.discard(idx)
 
+    
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
+        '''Handle a SubmitTransaction message from server. Validate the transaction and add it to the mempool if valid.'''
         print("Received transaction")
-        # TODO check if from teammates or server
+        
+        if self._server_peer is not None and peer == self._server_peer:
+            return
+
         transaction = Transaction(
             sender_key = payload.sender_key,
             data = payload.data,
@@ -125,8 +142,12 @@ class BlockchainCommunity(Community):
     
     @lazy_wrapper(GetChainHeight)
     def on_chain_height(self, peer: PeerType, payload: GetChainHeight) -> None:
+        '''Handle a GetChainHeight message from server or peer. Respond with the current chain height and tip hash.'''
         print("Received chain height function")
-        # TODO check if from teammates or server
+        
+        if not self.from_server_or_teammate(peer):
+            return
+        
         height = self.blockchain.get_chain_height()
         tip_hash = self.blockchain.get_block(height).block_hash
         bundle = ChainHeightResponse(
@@ -139,12 +160,19 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:
         print(f"Received on get block with height {payload.height}")
-        # TODO check if from teammates or server
+        
+        if not self.from_server_or_teammate(peer):
+            return
+
         block = self.blockchain.get_block(payload.height)
         if block is None:
             print(f"⚠️  Received GetBlock for invalid height {payload.height}")
             return
         
+        tx_count = len(block.tx_hashes)
+        if tx_count > MAX_TX_HASHES:
+            print(f"Cannot serve GetBlock: block at height {payload.height} has too many tx hashes ({tx_count}), max is {MAX_TX_HASHES}")
+            return
         bundle = BlockResponse(
             height = payload.height,
             prev_hash = block.prev_hash,
@@ -160,7 +188,17 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(BlockResponse)
     def on_block_response(self, peer: PeerType, payload: BlockResponse) -> None:
         print(f"Received block")
-        # TODO check if from teammates or server
+        
+        if not self.from_server_or_teammate(peer):
+            return
+
+        if len(payload.tx_hashes) % 32 != 0:
+            print("Received BlockResponse with invalid tx_hashes length")
+            return
+        payload_tx_count = len(payload.tx_hashes) // 32
+        if payload_tx_count > MAX_TX_HASHES:
+            print(f"Received BlockResponse with too many tx hashes ({payload_tx_count}), max is {MAX_TX_HASHES}")
+            return
 
         block = Block(
             prev_hash=payload.prev_hash,
@@ -169,24 +207,95 @@ class BlockchainCommunity(Community):
             difficulty=payload.difficulty,
             nonce=payload.nonce,
             block_hash=payload.block_hash,
-            tx_hashes=payload.tx_hashes,
+            tx_hashes=[payload.tx_hashes[i:i + 32] for i in range(0, len(payload.tx_hashes), 32)],
         )
 
         if not block.verify_block():
-            # TODO
             print(f"NOT GOOD, block wrong")
             return
         
-        if payload.height <= self.blockchain.get_chain_height:
+        if payload.height <= self.blockchain.get_chain_height():
             print(f"too far behind or same height")
             return
         
-        if payload.height - 1 > self.blockchain.get_chain_height:
-            # TODO get multiple blocks including last
+        if payload.height - 1 > self.blockchain.get_chain_height(): # update own chain
+            print(f"Missing blocks, requesting from server starting at height {self.blockchain.get_chain_height() + 1}")
+            bundle = GetMultipleBlocks(
+                start_height = self.blockchain.get_chain_height() + 1
+            )
+            self.ez_send(peer, bundle)
             return
         
         self.blockchain.append_block(block)
     
+    @lazy_wrapper(GetMultipleBlocks)
+    def on_get_multiple_blocks(self, peer: PeerType, payload: GetMultipleBlocks) -> None:
+        print(f"Received request for multiple blocks starting at height {payload.start_height}")
+        
+        if not self.from_server_or_teammate(peer):
+            return
+        
+        start = payload.start_height
+        if start < 0 or start > self.blockchain.get_chain_height():
+            print(f"Invalid start height {start} for GetMultipleBlocks")
+            return
+        
+        blocks_data = b""
+        num_blocks = 0
+        for height in range(start, self.blockchain.get_chain_height() + 1):
+            block = self.blockchain.get_block(height)
+            if block is None:
+                print(f"Unexpectedly missing block at height {height} when preparing MultipleBlocksResponse")
+                return
+            
+            blocks_data += block.prev_hash
+            blocks_data += block.txs_hash
+            blocks_data += block.timestamp.to_bytes(8, "big", signed=True)
+            blocks_data += block.difficulty.to_bytes(8, "big", signed=True)
+            blocks_data += block.nonce.to_bytes(8, "big", signed=True)
+            blocks_data += block.block_hash
+            tx_count = len(block.tx_hashes)
+            if tx_count > MAX_TX_HASHES:
+                print(f"Block at height {height} has too many tx hashes ({tx_count}), max is {MAX_TX_HASHES}")
+                return
+            blocks_data += tx_count.to_bytes(2, "big")
+            for tx_hash in block.tx_hashes:
+                blocks_data += tx_hash
+            blocks_data += b"\x00" * ((MAX_TX_HASHES - tx_count) * 32)
+            
+            num_blocks += 1
+        
+        bundle = MultipleBlocksResponse(
+            start_height = start,
+            num_blocks = num_blocks,
+            blocks_data = blocks_data,
+        )
+        self.ez_send(peer, bundle)
+
+    @lazy_wrapper(MultipleBlocksResponse)
+    def on_multiple_blocks_response(self, peer: PeerType, payload: MultipleBlocksResponse) -> None:
+        print(f"Received blocksss")
+        
+        if not self.from_server_or_teammate(peer):
+            return
+        
+        if payload.start_height - 1 > self.blockchain.get_chain_height():
+            print(f"Missing blocks, cannot add block at height {payload.start_height}")
+            return
+
+        for i in range(payload.num_blocks):
+            block = self.extract_ith_block_from_payload(payload, i)
+
+            if not block.verify_block():
+                print(f"NOT GOOD, block wrong")
+                return
+            
+            if payload.start_height + i <= self.blockchain.get_chain_height():
+                print(f"Block at height {payload.start_height + i} already exists")
+                return
+            
+            self.blockchain.append_block(block)
+
     async def _mining_loop(self) -> None:
         """Mine only when there is at least one transaction in the mempool."""
         print("[mining] Started")
@@ -213,3 +322,65 @@ class BlockchainCommunity(Community):
             except Exception as e:
                 print(f"[mining] Error: {e}")
                 await asyncio.sleep(1)
+                
+    def extract_ith_block_from_payload(payload, i: int) -> Block | None:
+        # payload.block_count: int
+        # payload.blocks_data: bytes
+        # Returns Block or None
+        if i < 0 or i >= payload.block_count:
+            return None
+
+        data = payload.blocks_data
+        offset = 0
+
+        for idx in range(payload.block_count):
+            # Fixed-size part: 32+32+8+8+8+32+2 = 122 bytes, plus fixed tx hash slots
+            if len(data) - offset < 122 + MAX_TX_HASHES * 32:
+                return None
+
+            prev_hash = data[offset:offset + 32]
+            offset += 32
+
+            txs_hash = data[offset:offset + 32]
+            offset += 32
+
+            timestamp = int.from_bytes(data[offset:offset + 8], "big", signed=True)
+            offset += 8
+
+            difficulty = int.from_bytes(data[offset:offset + 8], "big", signed=True)
+            offset += 8
+
+            nonce = int.from_bytes(data[offset:offset + 8], "big", signed=True)
+            offset += 8
+
+            block_hash = data[offset:offset + 32]
+            offset += 32
+
+            tx_count = int.from_bytes(data[offset:offset + 2], "big")
+            offset += 2
+
+            if tx_count < 0 or tx_count > MAX_TX_HASHES:
+                return None
+
+            if len(data) - offset < MAX_TX_HASHES * 32:
+                return None
+
+            tx_hashes = []
+            for _ in range(tx_count):
+                tx_hashes.append(data[offset:offset + 32])
+                offset += 32
+
+            offset += (MAX_TX_HASHES - tx_count) * 32
+
+            if idx == i:
+                return Block(
+                    prev_hash=prev_hash,
+                    txs_hash=txs_hash,
+                    timestamp=timestamp,
+                    difficulty=difficulty,
+                    nonce=nonce,
+                    block_hash=block_hash,
+                    tx_hashes=tx_hashes,
+                )
+
+        return None

@@ -46,7 +46,20 @@ class BlockResponse(VariablePayload):
 
 # ─── Blockchain community messages ────────────────────────
 
+class GetMultipleBlocks(VariablePayload):
+    msg_id = 7
+    format_list = ["q"]
+    names = ["start_height"]
+
+class MultipleBlocksResponse(VariablePayload):
+    msg_id = 8
+    format_list = ["q", "q", "varlenH"]
+    names = ["start_height", "num_blocks", "blocks_data"]
+
 # class BroadcastBlock(VariablePayload):
 #     msg_id = 7
 #     format_list = ["q", "varlenH", "varlenH", "varlenH", "q", "q", "q", "varlenH"]
 #     names = ["height", "prev_hash", "txs_hash", "block_hash", "timestamp", "difficulty", "nonce", "tx_hashes"]
+
+
+

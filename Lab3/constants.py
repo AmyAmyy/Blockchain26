@@ -17,6 +17,7 @@ SERVER_PUBKEY_BYTES = bytes.fromhex(SERVER_PUBKEY_HEX)
 # ── Our blockchain community ───────────────────────────────────────────────
 BLOCKCHAIN_COMMUNITY_ID = b"\x01\xb6\xf0}H\xc6R\xc9H\x1a\xd6\x11H\xf6{G%i\xf3i"
 DIFFICULTY = 16
+MAX_TX_HASHES = 4
 
 # ── Group / team members ───────────────────────────────────────────────────
 GROUP_ID = "206290bb8cc8016f"
