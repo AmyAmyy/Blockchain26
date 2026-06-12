@@ -2,7 +2,6 @@ import asyncio
 from ipv8.community import Community, CommunitySettings
 from ipv8.peer import Peer as PeerType
 from ipv8.lazy_community import lazy_wrapper
-from hashlib import sha256
 
 from message_payloads import (
     GetChainHeight,
@@ -60,6 +59,9 @@ class BlockchainCommunity(Community):
         self.add_message_handler(SubmitTransaction, self.on_submit_transaction)
         self.add_message_handler(GetChainHeight, self.on_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
+        self.add_message_handler(BlockResponse, self.on_block_response)
+        self.add_message_handler(GetMultipleBlocks, self.on_get_multiple_blocks)
+        self.add_message_handler(MultipleBlocksResponse, self.on_multiple_blocks_response)
 
     def started(self) -> None:
         self.network.add_peer_observer(self)
@@ -74,6 +76,22 @@ class BlockchainCommunity(Community):
             return True
         print("⚠️  Received message from unknown peer, ignoring")
         return False
+    
+    def broadcast_block(self, new_block: Block) -> None:
+        bundle = BlockResponse(
+            height = self.blockchain.get_chain_height(),
+            prev_hash = new_block.prev_hash,
+            txs_hash = new_block.txs_hash,
+            timestamp = new_block.timestamp,
+            difficulty = new_block.difficulty,
+            nonce = new_block.nonce,
+            block_hash = new_block.block_hash,
+            tx_hashes = b"".join(new_block.tx_hashes),
+        )
+
+        for peer in self.member_peers:
+            if peer is not None and peer != self.my_peer:
+                self.ez_send(peer, bundle)
 
     # ── peer discovery ──────────────────────────────────────────────────────
     
@@ -108,12 +126,10 @@ class BlockchainCommunity(Community):
     @lazy_wrapper(SubmitTransaction)
     def on_submit_transaction(self, peer: PeerType, payload: SubmitTransaction) -> None:
         '''Handle a SubmitTransaction message from server. Validate the transaction and add it to the mempool if valid.'''
-        print("Received transaction")
+        print("RECEIVED SUBMIT TRANSACTION")
         
         if not self.from_server_or_teammate(peer):
             return
-
-        print("server or teammate")
 
         transaction = Transaction(
             sender_key = payload.sender_key,
@@ -122,7 +138,6 @@ class BlockchainCommunity(Community):
             signature = payload.signature,
         )
         
-        print(f"Transaction details: sender={transaction.sender_key.hex()[:16]}... data={transaction.data[:16]}... timestamp={transaction.timestamp} signature={transaction.signature.hex()[:16]}...")
         if not transaction.verify_signature():
             print("⚠️  Received transaction with invalid signature")
             bundle = SubmitTransactionResponse(
@@ -133,7 +148,7 @@ class BlockchainCommunity(Community):
             self.ez_send(peer, bundle)
             return
         
-        print("Transaction signature valid")
+        print(f"Add transaction to mempool")
         self.blockchain.mempool.append(transaction)
         print(f"Received valid transaction, mempool size is now {len(self.blockchain.mempool)}")
         bundle = SubmitTransactionResponse(
@@ -163,7 +178,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:
-        print(f"Received on get block with height {payload.height}")
+        # print(f"Received on get block with height {payload.height}")
         
         if not self.from_server_or_teammate(peer):
             return
@@ -230,7 +245,11 @@ class BlockchainCommunity(Community):
             self.ez_send(peer, bundle)
             return
         
-        self.blockchain.append_block(block)
+        if not self.blockchain.append_block(block):
+            # TODO sync strategy
+            print(f"Failed to append block at height {payload.height}, maybe due to mismatched prev_hash?")
+        print(f"Added block at height {payload.height} to the chain")
+        print(f"Chain height is now {self.blockchain.get_chain_height()}")
     
     @lazy_wrapper(GetMultipleBlocks)
     def on_get_multiple_blocks(self, peer: PeerType, payload: GetMultipleBlocks) -> None:
@@ -289,6 +308,9 @@ class BlockchainCommunity(Community):
 
         for i in range(payload.num_blocks):
             block = self.extract_ith_block_from_payload(payload, i)
+            if block is None:
+                print(f"Failed to parse block index {i} from MultipleBlocksResponse")
+                return
 
             if not block.verify_block():
                 print(f"NOT GOOD, block wrong")
@@ -298,23 +320,26 @@ class BlockchainCommunity(Community):
                 print(f"Block at height {payload.start_height + i} already exists")
                 return
             
-            self.blockchain.append_block(block)
+            if not self.blockchain.append_block(block):
+                # TODO sync strategy
+                print(f"Failed to append block at height {payload.start_height + i}, maybe due to mismatched prev_hash?")
 
     async def _mining_loop(self) -> None:
         """Mine only when there is at least one transaction in the mempool."""
         print("[mining] Started")
 
         while True:
-            if not self.blockchain.mempool:
-                await asyncio.sleep(0.2)
-                continue
-
             try:
                 # Mining is CPU-bound, so run it in a worker thread.
                 new_block = await asyncio.get_running_loop().run_in_executor(
                     None,
                     self.blockchain.mine_block,
                 )
+                if new_block is None:
+                    print("Mining failed, skipping block broadcast")
+                    continue
+                self.broadcast_block(new_block)
+                
                 height = self.blockchain.get_chain_height()
                 print(
                     f"[mining] Mined block {height} "
@@ -325,19 +350,20 @@ class BlockchainCommunity(Community):
                 raise
             except Exception as e:
                 print(f"[mining] Error: {e}")
-                await asyncio.sleep(1)
                 
-    def extract_ith_block_from_payload(self,payload, i: int) -> Block | None:
-        # payload.block_count: int
+            await asyncio.sleep(15)
+                
+    def extract_ith_block_from_payload(self, payload, i: int) -> Block | None:
+        # payload.num_blocks: int
         # payload.blocks_data: bytes
         # Returns Block or None
-        if i < 0 or i >= payload.block_count:
+        if i < 0 or i >= payload.num_blocks:
             return None
 
         data = payload.blocks_data
         offset = 0
 
-        for idx in range(payload.block_count):
+        for idx in range(payload.num_blocks):
             # Fixed-size part: 32+32+8+8+8+32+2 = 122 bytes, plus fixed tx hash slots
             if len(data) - offset < 122 + MAX_TX_HASHES * 32:
                 return None
