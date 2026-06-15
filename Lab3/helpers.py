@@ -1,17 +1,3 @@
-"""
-block_primitives.py
-===================
-Self-contained block primitives for the Lab 3 PoW blockchain.
-No IPv8 dependency — import and unit-test freely.
-
-Block header layout (84 bytes, all big-endian):
-  prev_hash   32 bytes
-  txs_hash    32 bytes
-  timestamp    8 bytes  uint64
-  difficulty   4 bytes  uint32
-  nonce        8 bytes  uint64
-"""
-
 from hashlib import sha256
 import random
 import struct
@@ -20,12 +6,9 @@ from typing import TYPE_CHECKING
 
 from constants import MAX_TX_HASHES, NONCE_SPACE
 
+# To resolve circular import
 if TYPE_CHECKING:
     from blockchain import Block
-
-# ---------------------------------------------------------------------------
-# Low-level helpers
-# ---------------------------------------------------------------------------
 
 def compute_block_hash(prev_hash: bytes, txs_hash: bytes, timestamp: int, difficulty: int, nonce: int) -> bytes:
     header = prev_hash + txs_hash + struct.pack(">Q", timestamp) + struct.pack(">I", difficulty) + struct.pack(">Q", nonce) 
@@ -48,13 +31,6 @@ def check_pow(block_hash: bytes, difficulty: int) -> bool:
 
 def mine(prev_hash: bytes, tx_hashes: list[bytes],
                difficulty: int, timestamp: int | None = None) -> int:
-    """
-    Search for a nonce that satisfies the declared difficulty.
-
-    Returns the nonce that satisfies the difficulty.
-    The caller is free to set difficulty; 4–8 bits is fast for testing,
-    16–20 bits is more realistic but slower.
-    """
     if timestamp is None:
         timestamp = int(time.time())
 
@@ -67,9 +43,6 @@ def mine(prev_hash: bytes, tx_hashes: list[bytes],
         nonce = (nonce + 1) % NONCE_SPACE
 
 def extract_ith_block_from_payload(payload, i: int) -> "Block | None":
-        # payload.num_blocks: int
-        # payload.blocks_data: bytes
-        # Returns Block or None
         if i < 0 or i >= payload.num_blocks:
             return None
 
@@ -77,7 +50,6 @@ def extract_ith_block_from_payload(payload, i: int) -> "Block | None":
         offset = 0
 
         for idx in range(payload.num_blocks):
-            # Fixed-size part: 32+32+8+4+8+32+2 = 118 bytes, plus fixed tx hash slots
             if len(data) - offset < 118 + MAX_TX_HASHES * 32:
                 return None
 

@@ -4,10 +4,8 @@ from pathlib import Path
 import struct
 import time
 from ipv8.keyvault.crypto import default_eccrypto
-from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE, MAX_TX_HASHES, MY_MEMBER_ID
+from constants import DIFFICULTY, GENESIS_PREV_HASH, GENESIS_TIMESTAMP, GENESIS_DIFFICULTY, GENESIS_NONCE, MAX_TX_HASHES, MY_MEMBER_ID, DUMP_DIR_PATH
 from helpers import mine, compute_block_hash, compute_txs_hash, check_pow
-
-# ── Block  ─────────────────────────────────────────────────────────────
 
 @dataclass
 class Block:
@@ -43,8 +41,6 @@ class Block:
         return True
     
     
-# ── Transaction  ─────────────────────────────────────────────────────────────
-    
 @dataclass
 class Transaction:
     sender_key: bytes
@@ -54,12 +50,10 @@ class Transaction:
     
     @property
     def tx_hash(self) -> bytes:
-        ts_bytes = struct.pack(">q", self.timestamp)   # signed 64-bit BE (wire type `q`)
+        ts_bytes = struct.pack(">q", self.timestamp)
         return sha256(self.sender_key + self.data + ts_bytes + self.signature).digest()
     
     def verify_signature(self) -> bool:
-        """Verify the transaction signature using IPv8 crypto."""
-        # The signed message is: sender_key || data || timestamp_8byte_be
         message = self.sender_key + self.data + struct.pack(">q", self.timestamp)
         try:
             key = default_eccrypto.key_from_public_bin(self.sender_key)
@@ -69,18 +63,19 @@ class Transaction:
     
 class Blockchain:
     def __init__(self):
-        self.chain: list[Block] = [self._make_genesis()]
+        self.chain: list[Block] = [self.make_genesis()]
         self.mempool: list[Transaction] = []
         # Maps a transaction hash to the full Transaction object for reorgs
         self.transaction_store: dict[bytes, Transaction] = {}
-        self._last_dumped_height: int = -1
-        self._dump_dir = Path(__file__).resolve().parent / "chain_dumps"
-        self._dump_dir.mkdir(exist_ok=True)
+        
+        self.last_dumped_height: int = -1
+        self.dump_dir = Path(__file__).resolve().parent / DUMP_DIR_PATH
+        self.dump_dir.mkdir(exist_ok=True)
 
     def dump_snapshot(self) -> None:
         """Write a chain snapshot for the current height."""
         height = self.get_chain_height()
-        snapshot_path = self._dump_dir / f"member_{MY_MEMBER_ID}_height_{height}.txt"
+        snapshot_path = self.dump_dir / f"member_{MY_MEMBER_ID}_height_{height}.txt"
         lines = [
             f"member_id={MY_MEMBER_ID}",
             f"height={height}",
@@ -108,10 +103,10 @@ class Blockchain:
 
         try:
             snapshot_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            self._last_dumped_height = height
-            print(f"[dump] Wrote blockchain snapshot: {snapshot_path}")
+            self.last_dumped_height = height
+            print(f"[DUMP] Wrote blockchain snapshot (height={height})")
         except OSError as e:
-            print(f"[dump] Failed to write blockchain snapshot: {e}")
+            print(f"[DUMP] Failed to write blockchain snapshot: {e}")
         
     def get_chain_height(self) -> int:
         return len(self.chain) - 1  # genesis block is height 0
@@ -153,7 +148,7 @@ class Blockchain:
         self.chain.append(block)
         height = self.get_chain_height()
         
-        if height > 0 and height % 10 == 0 and height != self._last_dumped_height:
+        if height > 0 and height % 10 == 0 and height != self.last_dumped_height:
             self.dump_snapshot()
             
         return True
@@ -201,7 +196,7 @@ class Blockchain:
 
         height = self.get_chain_height()
         
-        if height > 0 and height % 10 == 0 and height != self._last_dumped_height:
+        if height > 0 and height % 10 == 0 and height != self.last_dumped_height:
             self.dump_snapshot()
             
         return True
@@ -213,7 +208,7 @@ class Blockchain:
         transactions = self.mempool[:MAX_TX_HASHES]
         tx_hashes = [tx.tx_hash for tx in transactions]
         if len(self.mempool) > MAX_TX_HASHES:
-            print(f"Mining block with max {MAX_TX_HASHES} tx hashes; {len(self.mempool) - MAX_TX_HASHES} txs remain in mempool")
+            print(f"[MINING] Mining new block with {len(tx_hashes)} transactions, {len(self.mempool) - MAX_TX_HASHES} transactions left in mempool")
         del self.mempool[:len(tx_hashes)]
         timestamp = int(time.time())
 
@@ -232,17 +227,16 @@ class Blockchain:
             tx_hashes = tx_hashes,
         )
         
-        # Add to chain and clear mempool
         if not self.append_block(new_block):
-            print("Failed to append mined block to the chain")
+            print("[MINING] Failed to append mined block to chain, chain was updated in the meantime, re-adding transactions to mempool")
             self.mempool.extend(transactions)
             return None
 
-        print(f"Mined new block at height {self.get_chain_height()} with {len(tx_hashes)} transactions")
+        print(f"[MINING] Mined and appended new block at height {self.get_chain_height()} with {len(tx_hashes)} transactions (hash={block_hash.hex()[:16]}...)")
         
         return new_block
     
-    def _make_genesis(self) -> Block:
+    def make_genesis(self) -> Block:
         txs_hash = compute_txs_hash([])   # SHA256(b"")
         nonce = GENESIS_NONCE
         block_hash = compute_block_hash(
