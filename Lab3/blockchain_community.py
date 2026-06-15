@@ -2,6 +2,7 @@ import asyncio
 from ipv8.community import Community, CommunitySettings
 from ipv8.peer import Peer as PeerType
 from ipv8.lazy_community import lazy_wrapper
+from constants import MAX_SEARCH_DEPTH
 
 from message_payloads import (
     GetChainHeight,
@@ -246,8 +247,15 @@ class BlockchainCommunity(Community):
             return
         
         if not self.blockchain.append_block(block):
-            # TODO sync strategy
-            print(f"Failed to append block at height {payload.height}, maybe due to mismatched prev_hash?")
+            # Competing branch: only reorg if their chain is strictly longer
+            if payload.height > self.blockchain.get_chain_height():
+                print(f"Competing branch detected at height {payload.height}, fetching overlap window")
+                self.ez_send(peer, GetMultipleBlocks(
+                    start_height=max(0, self.blockchain.get_chain_height() - MAX_SEARCH_DEPTH)
+                ))
+            else:
+                print(f"Failed to append block at height {payload.height}, ignoring")
+
         print(f"Added block at height {payload.height} to the chain")
         print(f"Chain height is now {self.blockchain.get_chain_height()}")
     
@@ -301,11 +309,13 @@ class BlockchainCommunity(Community):
         
         if not self.from_server_or_teammate(peer):
             return
-        
+
         if payload.start_height - 1 > self.blockchain.get_chain_height():
             print(f"Missing blocks, cannot add block at height {payload.start_height}")
             return
-
+        
+        # Build list of blocks from payload and verify them
+        blocks: list[Block] = []
         for i in range(payload.num_blocks):
             block = self.extract_ith_block_from_payload(payload, i)
             if block is None:
@@ -316,13 +326,41 @@ class BlockchainCommunity(Community):
                 print(f"NOT GOOD, block wrong")
                 return
             
-            if payload.start_height + i <= self.blockchain.get_chain_height():
-                print(f"Block at height {payload.start_height + i} already exists")
+            blocks.append(block)
+
+        # Try to append blocks
+        for idx, block in enumerate(blocks):
+            if payload.start_height + idx <= self.blockchain.get_chain_height():
+                # This block is at or below our current height
+                idx += 1
+                continue
+            
+            if self.blockchain.append_block(block):
+                print(f"Appended block at height {payload.start_height + idx} to the chain")
+                idx += 1
+            else:
+                # fork resolution
+                their_height = payload.start_height + payload.num_blocks - 1
+                branch_start_height = payload.start_height
+                self._fork_resolution(peer, their_height, blocks, branch_start_height)
+                return
+
+    def _fork_resolution(self, peer: PeerType, their_height: int, branch: list[Block], branch_start_height: int) -> None:
+        # Fork resolution: if any blocks didn't append cleanly, find common ancestor
+        if their_height > self.blockchain.get_chain_height():
+            ancestor_height = self.find_common_ancestor(branch)
+            if ancestor_height is None:
+                if branch_start_height == 0 or their_height - branch_start_height >= MAX_SEARCH_DEPTH:
+                    print("[reorg] No common ancestor found, cannot resolve fork")
+                    return
+                fetch_start = max(0, their_height - MAX_SEARCH_DEPTH)
+                print(f"[reorg] Ancestor not found; requesting earlier blocks from {fetch_start}")
+                self.ez_send(peer, GetMultipleBlocks(start_height=fetch_start))
                 return
             
-            if not self.blockchain.append_block(block):
-                # TODO sync strategy
-                print(f"Failed to append block at height {payload.start_height + i}, maybe due to mismatched prev_hash?")
+            fork_start_index = ancestor_height + 1
+            self.blockchain.switch_to_fork(ancestor_height, branch[max(0, fork_start_index):])
+            print(f"Chain height is now {self.blockchain.get_chain_height()}")
 
     async def _mining_loop(self) -> None:
         """Mine only when there is at least one transaction in the mempool."""
@@ -414,3 +452,36 @@ class BlockchainCommunity(Community):
                 )
 
         return None
+    
+    def find_common_ancestor(self, branch: list[Block]) -> int | None:
+        # Find the height of the highest common ancestor
+        for block in reversed(branch):
+            height = self.blockchain.get_block_height(block.prev_hash)
+            if height is not None:
+                return height
+        return None
+
+    def switch_to_fork(self, ancestor_height: int, new_branch: list[Block]) -> None:
+        reorg_depth = self.blockchain.get_chain_height() - ancestor_height
+        if reorg_depth > MAX_SEARCH_DEPTH:
+            print(f"[reorg] Refusing reorg of depth {reorg_depth} > {MAX_SEARCH_DEPTH}")
+            return
+
+        # Collect orphaned tx hashes, put matching mempool txs back (they're already there)
+        orphaned_tx_hashes: set[bytes] = set()
+        for block in self.chain[ancestor_height + 1:]:
+            orphaned_tx_hashes.update(block.tx_hashes)
+        
+        new_tx_hashes: set[bytes] = set()
+        for block in new_branch:
+            new_tx_hashes.update(block.tx_hashes)
+
+        truly_orphaned = orphaned_tx_hashes - new_tx_hashes
+        if truly_orphaned:
+            print(f"[reorg] {len(truly_orphaned)} orphaned tx hashes have no full tx object, lost")
+
+        self.chain = self.chain[:ancestor_height + 1]
+        for block in new_branch:
+            self.chain.append(block)
+
+        print(f"[reorg] Reorged to ancestor {ancestor_height}, new height {self.get_chain_height()}")
