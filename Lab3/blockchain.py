@@ -69,8 +69,10 @@ class Transaction:
     
 class Blockchain:
     def __init__(self):
-        self.chain: list[Block] = [self.make_genesis()]
+        self.chain: list[Block] = [self._make_genesis()]
         self.mempool: list[Transaction] = []
+        # Maps a transaction hash to the full Transaction object for reorgs
+        self.transaction_store: dict[bytes, Transaction] = {}
         self._last_dumped_height: int = -1
         self._dump_dir = Path(__file__).resolve().parent / "chain_dumps"
         self._dump_dir.mkdir(exist_ok=True)
@@ -122,14 +124,86 @@ class Blockchain:
             return self.chain[height]
         return None
     
+    def get_block_height(self, block_hash: bytes) -> int | None:
+        for height, block in enumerate(self.chain):
+            if block.block_hash == block_hash:
+                return height
+        return None
+
+    def find_common_ancestor(self, branch: list[Block]) -> int | None:
+        for block in reversed(branch):
+            height = self.get_block_height(block.prev_hash)
+            if height is not None:
+                return height
+        return None
+
+    def add_transaction(self, transaction: Transaction) -> bool:
+        tx_hash = transaction.tx_hash
+        if tx_hash in self.transaction_store:
+            return False
+        
+        self.transaction_store[tx_hash] = transaction
+        self.mempool.append(transaction)
+        return True
+
     def append_block(self, block: Block) -> bool:
         if self.get_chain_tip().block_hash != block.prev_hash:
             return False
         
         self.chain.append(block)
         height = self.get_chain_height()
+        
         if height > 0 and height % 10 == 0 and height != self._last_dumped_height:
             self.dump_snapshot()
+            
+        return True
+
+    def switch_to_fork(self, ancestor_height: int, new_branch: list[Block]) -> bool:
+        if ancestor_height < 0 or ancestor_height >= len(self.chain):
+            return False
+
+        candidate_prev_hash = self.chain[ancestor_height].block_hash
+        for block in new_branch:
+            if block.prev_hash != candidate_prev_hash:
+                return False
+            if not block.verify_block():
+                return False
+            candidate_prev_hash = block.block_hash
+
+        replaced_tx_hashes: set[bytes] = set()
+        for block in self.chain[ancestor_height + 1:]:
+            replaced_tx_hashes.update(block.tx_hashes)
+
+        replacement_tx_hashes: set[bytes] = set()
+        for block in new_branch:
+            replacement_tx_hashes.update(block.tx_hashes)
+
+        orphaned_tx_hashes = replaced_tx_hashes - replacement_tx_hashes
+        orphaned_transactions = []
+        for tx_hash in orphaned_tx_hashes:
+            tx = self.transaction_store.get(tx_hash)
+            if not tx:
+                continue
+            orphaned_transactions.append(tx)
+
+        self.chain = self.chain[:ancestor_height + 1] + list(new_branch)
+
+        # Re-add orphaned transactions that are not confirmed in the new branch.
+        known_mempool_hashes = {tx.tx_hash for tx in self.mempool}
+        for tx in orphaned_transactions:
+            if tx.tx_hash in known_mempool_hashes:
+                continue
+            self.mempool.append(tx)
+            known_mempool_hashes.add(tx.tx_hash)
+
+        # Drop transactions that are now confirmed on the replacement branch.
+        self.mempool = [tx for tx in self.mempool if tx.tx_hash not in replacement_tx_hashes]
+
+        height = self.get_chain_height()
+        
+        if height > 0 and height % 10 == 0 and height != self._last_dumped_height:
+            self.dump_snapshot()
+            
         return True
     
     def mine_block(self) -> Block | None:
@@ -159,7 +233,6 @@ class Blockchain:
         )
         
         # Add to chain and clear mempool
-        # TODO niet meteen block toevoegen maar eerst checken
         if not self.append_block(new_block):
             print("Failed to append mined block to the chain")
             self.mempool.extend(transactions)
@@ -169,7 +242,7 @@ class Blockchain:
         
         return new_block
     
-    def make_genesis(self) -> Block:
+    def _make_genesis(self) -> Block:
         txs_hash = compute_txs_hash([])   # SHA256(b"")
         nonce = GENESIS_NONCE
         block_hash = compute_block_hash(

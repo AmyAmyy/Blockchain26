@@ -40,4 +40,17 @@ GENESIS_TIMESTAMP = 1748736000  # Fixed for all nodes
 GENESIS_DIFFICULTY = 0
 GENESIS_NONCE = 0
 
+# Keep nonce in signed int64 range
+# Valid values are [0, 2^63 - 1], giving a space size of 2^63.
+NONCE_SPACE = 2**63
+
+ZERO_HASH = b"\x00" * 32      # used as prev_hash of the genesis block
+
+
 MAX_SEARCH_DEPTH = 10
+
+PARTITION_TEST_ENABLED = False
+PARTITION_START_AFTER_SECONDS = 30
+PARTITION_DURATION_SECONDS = 30
+
+MAX_SLEEP_MINING_LOOP = 15

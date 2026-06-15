@@ -13,20 +13,15 @@ Block header layout (84 bytes, all big-endian):
 """
 
 from hashlib import sha256
+import random
 import struct
 import time
+from typing import TYPE_CHECKING
 
+from constants import MAX_TX_HASHES, NONCE_SPACE
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-HEADER_FORMAT = ">32s32sQIQ"   # big-endian: 32s 32s uint64 uint32 uint64
-HEADER_SIZE   = struct.calcsize(HEADER_FORMAT)   # must be 84
-assert HEADER_SIZE == 84, f"Header size is {HEADER_SIZE}, expected 84"
-
-ZERO_HASH = b"\x00" * 32      # used as prev_hash of the genesis block
-
+if TYPE_CHECKING:
+    from blockchain import Block
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -64,46 +59,73 @@ def mine(prev_hash: bytes, tx_hashes: list[bytes],
         timestamp = int(time.time())
 
     commitment = compute_txs_hash(tx_hashes)
-    nonce = 0
+    nonce = random.randint(0, NONCE_SPACE - 1)
     while True:
         h = compute_block_hash(prev_hash, commitment, timestamp, difficulty, nonce)
         if check_pow(h, difficulty):
             return nonce
-        nonce += 1
+        nonce = (nonce + 1) % NONCE_SPACE
 
+def extract_ith_block_from_payload(payload, i: int) -> "Block | None":
+        # payload.num_blocks: int
+        # payload.blocks_data: bytes
+        # Returns Block or None
+        if i < 0 or i >= payload.num_blocks:
+            return None
 
-# def validate_block(block: dict, expected_prev_hash: bytes | None = None) -> str | None:
-#     """
-#     Validate a block dict (as returned by mine_block or received from a peer).
+        data = payload.blocks_data
+        offset = 0
 
-#     Returns None if valid, or a human-readable error string if not.
+        for idx in range(payload.num_blocks):
+            # Fixed-size part: 32+32+8+4+8+32+2 = 118 bytes, plus fixed tx hash slots
+            if len(data) - offset < 118 + MAX_TX_HASHES * 32:
+                return None
 
-#     Checks:
-#       1. block_hash == SHA-256(header)
-#       2. PoW: block_hash has >= difficulty leading zero bits
-#       3. prev_hash matches expected_prev_hash (if provided)
-#       4. txs_hash matches recomputed commitment over tx_hashes (if provided)
-#     """
-#     h = compute_block_hash(block["prev_hash"], block["txs_hash"],
-#                    block["timestamp"], block["difficulty"], block["nonce"])
+            prev_hash = data[offset:offset + 32]
+            offset += 32
 
-#     if h != block["block_hash"]:
-#         return f"block_hash mismatch: computed {h.hex()}, stored {block['block_hash'].hex()}"
+            txs_hash = data[offset:offset + 32]
+            offset += 32
 
-#     if not check_pow(h, block["difficulty"]):
-#         bits = leading_zero_bits(h)
-#         return (f"PoW not satisfied: hash has {bits} leading zero bits, "
-#                 f"need {block['difficulty']}")
+            timestamp = int.from_bytes(data[offset:offset + 8], "big", signed=True)
+            offset += 8
 
-#     if expected_prev_hash is not None and block["prev_hash"] != expected_prev_hash:
-#         return (f"prev_hash mismatch: expected {expected_prev_hash.hex()}, "
-#                 f"got {block['prev_hash'].hex()}")
+            difficulty = int.from_bytes(data[offset:offset + 4], "big", signed=False)
+            offset += 4
 
-#     # If the caller passes tx_hashes, recompute and compare
-#     if "tx_hashes" in block:
-#         computed = txs_hash(block["tx_hashes"])
-#         if computed != block["txs_hash"]:
-#             return (f"txs_hash mismatch: recomputed {computed.hex()}, "
-#                     f"stored {block['txs_hash'].hex()}")
+            nonce = int.from_bytes(data[offset:offset + 8], "big", signed=True)
+            offset += 8
 
-#     return None
+            block_hash = data[offset:offset + 32]
+            offset += 32
+
+            tx_count = int.from_bytes(data[offset:offset + 2], "big")
+            offset += 2
+
+            if tx_count < 0 or tx_count > MAX_TX_HASHES:
+                return None
+
+            if len(data) - offset < MAX_TX_HASHES * 32:
+                return None
+
+            tx_hashes = []
+            for _ in range(tx_count):
+                tx_hashes.append(data[offset:offset + 32])
+                offset += 32
+
+            offset += (MAX_TX_HASHES - tx_count) * 32
+
+            if idx == i:
+                from blockchain import Block
+
+                return Block(
+                    prev_hash=prev_hash,
+                    txs_hash=txs_hash,
+                    timestamp=timestamp,
+                    difficulty=difficulty,
+                    nonce=nonce,
+                    block_hash=block_hash,
+                    tx_hashes=tx_hashes,
+                )
+
+        return None
