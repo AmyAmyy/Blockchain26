@@ -46,6 +46,7 @@ class BlockchainCommunity(Community):
 
         self.blockchain = Blockchain()
         self.mining_task: asyncio.Task | None = None
+        self.polling_task: asyncio.Task | None = None
 
         self.started_at: float = time.monotonic()
 
@@ -74,6 +75,8 @@ class BlockchainCommunity(Community):
     def started(self) -> None:
         self.started_at = time.monotonic()
         self.network.add_peer_observer(self)
+        if self.polling_task is None:
+            self.polling_task = asyncio.create_task(self._polling_loop())
 
     def partition_active(self) -> bool:
         if not PARTITION_TEST_ENABLED:
@@ -98,7 +101,7 @@ class BlockchainCommunity(Community):
         return False
 
     def safe_send(self, peer: PeerType, payload: object) -> None:
-        if peer is not None and peer != self.my_peer:
+        if peer is None or peer == self.my_peer:
             return
         
         if not self.can_exchange_with_peer(peer):
@@ -209,9 +212,17 @@ class BlockchainCommunity(Community):
         
     @lazy_wrapper(ChainHeightResponse)
     def on_chain_height_response(self, peer: PeerType, payload: ChainHeightResponse) -> None:
-        print("Received chain height response")
-        # TODO: active polling
-        
+        if not self.can_exchange_with_peer(peer):
+            return
+
+        local_height = self.blockchain.get_chain_height()
+        local_tip_hash = self.blockchain.get_block(local_height).block_hash
+        print(f"[poll] ChainHeightResponse from {peer}: height={payload.height}")
+
+        if payload.height > local_height or (payload.height == local_height and payload.tip_hash != local_tip_hash):
+            start_height = max(0, local_height - MAX_SEARCH_DEPTH)
+            print(f"[poll] Remote chain is newer or diverged; requesting blocks from {peer} starting at {start_height}")
+            self.safe_send(peer, GetMultipleBlocks(start_height=start_height))
 
     @lazy_wrapper(GetBlock)
     def on_get_block(self, peer: PeerType, payload: GetBlock) -> None:       
@@ -408,6 +419,21 @@ class BlockchainCommunity(Community):
                 print("[reorg] Failed to switch to fork")
                 return
             print(f"Chain height is now {self.blockchain.get_chain_height()}")
+
+    async def _polling_loop(self) -> None:
+        print("[poll] Started chain height polling")
+        while True:
+            peers = [p for p in self.member_peers if p is not None and p != self.my_peer]
+            if self.server_peer is not None:
+                peers.append(self.server_peer)
+
+            if peers:
+                peer = random.choice(peers)
+                request_id = time.time_ns()
+                print(f"[poll] Requesting chain height from {peer} (request_id={request_id})")
+                self.safe_send(peer, GetChainHeight(request_id=request_id))
+
+            await asyncio.sleep(5)
 
     async def _mining_loop(self) -> None:
         """Mine only when there is at least one transaction in the mempool."""
