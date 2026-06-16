@@ -11,7 +11,7 @@ venv\Scripts\activate            # This is for Windows
 pip install -r requirements.txt
 ```
 
-This will create a virtual environment and install all necessary libraries. Also replace the emailaddress and Github URL
+This will create a virtual environment and install all necessary libraries. Also replace the email address and Github URL
 
 ### Usage
 
