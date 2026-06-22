@@ -11,10 +11,7 @@ venv\Scripts\activate            # This is for Windows
 pip install -r requirements.txt
 ```
 
-This will create a virtual environment and install all necessary libraries. Also create a `.env` file in `Lab1/` with the following:
-```
-EMAIL=your_email@example.com
-```
+This will create a virtual environment and install all necessary libraries. Also replace the email address and Github URL
 
 ### Usage
 
