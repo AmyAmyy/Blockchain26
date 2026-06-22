@@ -1,2 +1,9 @@
 *.pem
 *.txt
+.env
+venv/
+myenv/
+__pycache__/
+get_public_key.py
+create_communityid.py
+/Lab3/chain_dumps/

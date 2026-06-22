@@ -18,7 +18,7 @@ KEY_FILES = ["first_key.txt", "second_key.txt", "third_key.txt"]
 MEMBER_COUNT = 3
 
 # 0, 1, or 2. Unique per team member, determines which pubkey we expect to have.
-MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "0"))
+MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "1"))
 
 def load_member_pubkeys() -> list[bytes]:
     """Load the 3 registered Lab-1 public keys from disk (hex-encoded)."""
@@ -28,17 +28,16 @@ def load_member_pubkeys() -> list[bytes]:
 # Valid values are [0, 2^63 - 1], giving a space size of 2^63.
 NONCE_SPACE = 2**63
 DIFFICULTY = 20
-MAX_TX_HASHES = 4
-ZERO_HASH = b"\x00" * 32      # used as prev_hash of the genesis block
+MAX_TX_HASHES = 4 
 
-GENESIS_PREV_HASH = b'\x00' * 32
-GENESIS_TIMESTAMP = 1748736000  # Fixed for all nodes
+GENESIS_PREV_HASH = b'\x00' * 32  # used as prev_hash of the genesis block
+GENESIS_TIMESTAMP = 1748736000    # Fixed for all nodes
 GENESIS_DIFFICULTY = 0
 GENESIS_NONCE = 0
 
 MAX_SEARCH_DEPTH_FORK = 30
 
-PARTITION_TEST_ENABLED = True
+PARTITION_TEST_ENABLED = False
 PARTITION_START_AFTER_SECONDS = 30
 PARTITION_DURATION_SECONDS = 60
 

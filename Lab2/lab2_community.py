@@ -24,7 +24,7 @@ MEMBER_COUNT = 3
 TOTAL_ROUNDS = 3
 
 # 0, 1, or 2. Unique per team member, determines which pubkey we expect us to have
-MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "0"))
+MY_MEMBER_ID = int(os.environ.get("MY_MEMBER_ID", "1"))
 
 
 def _load_member_pubkeys() -> list[bytes]:
@@ -95,7 +95,7 @@ class Lab2Community(Community):
     def _send_to_member(self, member_idx: int, payload) -> None:
         peer = self.member_peers[member_idx]
         if peer is None:
-            # print(f"⚠️  Cannot send to member {member_idx}: peer not yet discovered")
+            # Peer not yet discovered
             return
         self.ez_send(peer, payload)
 
@@ -107,37 +107,36 @@ class Lab2Community(Community):
     def on_peer_added(self, peer: PeerType) -> None:
         pk_bytes = peer.public_key.key_to_bin()
         if pk_bytes == self._server_pubkey_bytes:
-            # print(f"Found server peer: {peer}")
+            # Found server peer
             self._server_peer = peer
 
         elif pk_bytes in self.member_pubkeys:
             idx = self.member_pubkeys.index(pk_bytes)
             if self.member_peers[idx] is None:
-                # print(f"Found team member peer #{idx}: {peer}")
+                # Found team member peer
                 self.member_peers[idx] = peer
                 self._ready_peers.add(idx)
         
         if self._all_teammembers_known() and self._server_peer is not None:
-            # print("All team members and server discovered")
+            # All team members and server discovered
             if self.member_id == 0 and not self._registration_sent:
                 self._registration_sent = True
                 asyncio.ensure_future(self._register_group())
-                
-        
+
     def on_peer_removed(self, peer: PeerType) -> None:
         if self._server_peer is not None and peer == self._server_peer:
-            # print("⚠️  Server peer disconnected")
+            # Server peer disconnected
             self._server_peer = None
         if peer in self.member_peers:
             idx = self.member_peers.index(peer)
-            # print(f"⚠️  Team member peer #{idx} disconnected: {peer}")
+            # Team member peer disconnected
             self.member_peers[idx] = None
             self._ready_peers.discard(idx)
 
     # ── bootstrap: registration ─────────────────────────────────────────────
 
     async def _register_group(self) -> None:
-        # print("Registering group with server...")
+        """Registers group with server"""
         payload = RegisterPayload(
             member1_key=self.member_pubkeys[0],
             member2_key=self.member_pubkeys[1],
@@ -147,17 +146,16 @@ class Lab2Community(Community):
 
     @lazy_wrapper(ResponseRegisterPayload)
     def on_response(self, peer: PeerType, payload: ResponseRegisterPayload) -> None:
-        # print(f"Received response from peer {peer}")
+        """ Handles register response from peer"""
         sender_pk = peer.public_key.key_to_bin()
         is_from_server = (sender_pk == self._server_pubkey_bytes)
         is_from_teammate = sender_pk in self.member_pubkeys
         if not (is_from_server or is_from_teammate):
-            # print(f"⚠️  Ignoring ResponseRegisterPayload from unknown peer {peer}")
+            # Ignoring ResponseRegisterPayload from unknown peer
             return
         if not payload.success:
-            # print(f"❌  Registration failed: {payload.message}")
+            # Registration failed
             return
-        # print(f"✅  Registered: {payload.message} (group_id={payload.group_id})")
         self.group_id = payload.group_id
         if self._i_am_leader():
             self._broadcast(payload=payload)
@@ -173,13 +171,16 @@ class Lab2Community(Community):
     # ── round driver ────────────────────────────────────────────────────────
 
     async def _start_round(self) -> None:
+        """Start the round by sending a challenge request, only if you're the leader"""
         assert self._i_am_leader(), "Only the round leader requests the challenge"
         self._collected_sigs[self.current_round] = [None, None, None]
-        # print(f"\n🚀  [round {self.current_round}] (leader={self.member_id}) requesting challenge")
         self.ez_send(self._server_peer, ChallengeRequestPayload(group_id=self.group_id))
 
     @lazy_wrapper(ChallengeResponsePayload)
     def on_challenge_response(self, peer: PeerType, payload: ChallengeResponsePayload) -> None:
+        """Handles receiving a challenge response, 
+           - if from server, broadcast message, and
+           - if from teammate, send signature to leader of the round"""
         sender_pk = peer.public_key.key_to_bin()
         is_from_server = (sender_pk == self._server_pubkey_bytes)
         is_from_teammate = sender_pk in self.member_pubkeys
@@ -189,18 +190,20 @@ class Lab2Community(Community):
         
         self.current_round = payload.round_number
         nonce = payload.nonce
+        # If self is leader of the round, we expect response from server
         if self._i_am_leader():
             if not is_from_server:
-                # print(f"⚠️  Ignoring ChallengeResponsePayload from unknown peer {peer} but expecting from server")
+                # Ignoring ChallengeResponsePayload from incorrect peer
                 return
             # Broadcast nonce to the other two members in parallel by redirecting message.
             self._broadcast(payload=payload)
             # Sign locally and store our own slot.
             my_sig = self._sign(nonce)
             self._collected_sigs[self.current_round][self.member_id] = my_sig
+        # Otherwise, we expect it from a teammate
         else:
             if not is_from_teammate:
-                # print(f"⚠️  Ignoring ChallengeResponsePayload from unknown peer {peer} but expecting from teammate")
+                # Ignoring ChallengeResponsePayload from unknown peer but expecting from teammate
                 return
             # Sign nonce after receiving message
             sig = self._sign(nonce)
@@ -214,24 +217,25 @@ class Lab2Community(Community):
 
     @lazy_wrapper(SignaturePayload)
     def on_signature(self, peer: PeerType, payload: SignaturePayload) -> None:
+        """Handles receiving a signature, only if you're the round leader"""
         round_number = payload.round_number
         idx = payload.member_index
         # Validate sender pubkey matches the claimed member_index.
         sender_pk = peer.public_key.key_to_bin()
         if idx < 0 or idx >= MEMBER_COUNT or sender_pk != self.member_pubkeys[idx]:
-            # # print(f"⚠️  Ignoring SignaturePayload: sender does not match member_index={idx}")
+            # Ignoring SignaturePayload if sender does not match member_index
             return
         if not self._i_am_leader():
-            # print(f"⚠️  Got SignaturePayload for round {round_number} but I am not its leader")
+            # Ignoring SignaturePayload for a round if I am not its leader
             return
         self._collected_sigs[round_number][idx] = payload.signature
         if self._collected_sigs[round_number].count(None) == 0:
             self._submit_round()
 
     def _submit_round(self) -> None:
+        """Submits all collected signatures to the server"""
         round_number = self.current_round
         sigs = self._collected_sigs[round_number]
-        # print(f"📤  [round {round_number}] all 3 sigs collected, submitting bundle ")
         bundle = SubmissionPayload(
             group_id=self.group_id,
             round_number=round_number,
@@ -243,21 +247,22 @@ class Lab2Community(Community):
 
     @lazy_wrapper(RoundResultPayload)
     def on_round_result(self, peer: PeerType, payload: RoundResultPayload) -> None:
+        """Handles round result message by updating the round number broadcasting the message and
+           if you're the leader, starting the next round"""
         sender_pk = peer.public_key.key_to_bin()
         is_from_server = (sender_pk == self._server_pubkey_bytes)
         is_from_teammate = sender_pk in self.member_pubkeys
         
         if not (is_from_server or is_from_teammate):
-            # print(f"⚠️  Ignoring RoundResultPayload from unknown peer {peer}")
+            # Ignoring RoundResultPayload from unknown peer
             return
         
         round_number = payload.round_number
         if not payload.success:
-            # print(f"❌  Round {round_number} failed: {payload.message}")
             return
 
         if is_from_server:
-            # print(f"✅  Round {round_number} successful: {payload.message}")
+            # Let other peers know so that they can update their round_number
             self._broadcast(payload=payload)
         
         # Auto-advance if I'm the next leader
